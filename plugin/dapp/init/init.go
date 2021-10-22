@@ -35,4 +35,5 @@ import (
 	_ "github.com/33cn/plugin/plugin/dapp/valnode"        //auto gen
 	_ "github.com/33cn/plugin/plugin/dapp/vote"           //auto gen
 	_ "github.com/33cn/plugin/plugin/dapp/wasm"           //auto gen
+	_ "gitlab.33.cn/contract/red-packet" //redpacket init
 )

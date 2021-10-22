@@ -96,6 +96,7 @@ update: ## version 可以是git tag打的具体版本号,也可以是commit hash
 	go get -v github.com/33cn/chain33@master ;fi
 	@go mod tidy
 dep:
+	@git config --global url."git@gitlab.33.cn:contract/red-packet.git".insteadOf "https://gitlab.33.cn/contract/red-packet.git"
 	@go get github.com/golangci/golangci-lint/cmd/golangci-lint@v1.18.0
 	@go get -u golang.org/x/tools/cmd/goimports
 	@go get -u github.com/mitchellh/gox
