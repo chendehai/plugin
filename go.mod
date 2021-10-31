@@ -37,7 +37,7 @@ require (
 	github.com/stretchr/testify v1.7.0
 	github.com/tjfoc/gmsm v1.3.2
 	github.com/valyala/fasthttp v1.5.0
-	gitlab.33.cn/contract/red-packet v0.0.5 
+	gitlab.33.cn/contract/red-packet v0.0.6 
 	golang.org/x/crypto v0.0.0-20210817164053-32db794688a5
 	golang.org/x/net v0.0.0-20210813160813-60bc85c4be6d
 	golang.org/x/sys v0.0.0-20210909193231-528a39cd75f3
