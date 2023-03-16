@@ -83,6 +83,13 @@ httpApi=["eth","web3","personal","admin","net"]
 wsAddr="localhost:8546"
 wsApi=["eth","web3","personal","admin","net"]
 
+[rpc.parachain]
+#主链节点的grpc服务器ip，当前可以支持多ip负载均衡，如“118.31.177.1:8802,39.97.2.127:8802”
+#mainChainGrpcAddr="jiedian2.bityuan.com,cloud.bityuan.com"
+mainChainGrpcAddr="localhost:8802"
+#配置grpc负载均衡为sync模式
+useGrpcLBSync=false
+
 [mempool]
 name="para"
 poolCacheSize=10240
@@ -120,9 +127,7 @@ halvePeriod=1000
 
 
 [consensus.sub.para]
-#主链节点的grpc服务器ip，当前可以支持多ip负载均衡，如“118.31.177.1:8802,39.97.2.127:8802”
-#ParaRemoteGrpcClient="jiedian2.bityuan.com,cloud.bityuan.com"
-ParaRemoteGrpcClient="localhost:8802"
+#ParaRemoteGrpcClient配置已变更为mainChainGrpcAddr
 #主链指定高度的区块开始同步
 startHeight=345850
 #主链指定高度后等待块数，防止主链回滚，联盟链最小为1，小于1则采用缺省高度100
@@ -139,7 +144,7 @@ mainForkParacrossCommitTx=2270000
 #主链开启循环检查共识交易done的fork高度,需要和主链保持严格一致,不可修改,4320000是bityuan主链对应高度， ycc或其他按实际修改
 #不可为0，主链Local时候需特殊配置
 mainLoopCheckCommitTxDoneForkHeight=4320000
-#无平行链交易的主链区块间隔，平行链产生一个空块，从高度0开始，配置[blockHeight:interval],比如["0:50","1000:100"]
+#无平行链交易的主链区块间隔，平行链产生一个空块，从高度0开始，格式[blockHeight:interval],比如["0:50","1000:100"],blockHeight为平行链高度
 emptyBlockInterval=["0:50"]
 
 #平行链共识节点聚合签名配置
@@ -247,19 +252,12 @@ manager=[
     "12qyocayNF7Lv6C9qW4avxs2E7U41fKSfv",
     "0x991fb09dc31a44b3177673f330c582ac2ea168e0"
 ]
-#配置的无效交易和无效证明，用于平行链zksync交易的回滚(平行链从0开始重新同步)
-#无效proof为包含无效交易的proof,是没有被提交到eth的proof，且包含了需要上链的交易比如withdraw,deposit的proof
-#没有包含需要上链的交易的proof是可以保留的，直到第一个包含需要上链tx的proof
-#无效交易则是proof里面第一个需要上链的tx(withdraw,deposit),在其之前的tx有效，其后的交易只有contract2tree有效
-#在平行链回滚结束后(如果有平行链自共识可以closeSelfConsensus=true关闭),用户可以把合约的资产通过contract2tree存回到L2
-#全部结束后确定最后的L2 treeroot，通过向eth提交exodus proof把资产提取到用户自己的eth账户
-invalidTxHash=""
-invalidProofRootHash=""
 #运营方配置收交易费地址,要求16进制
 #可把二层交易费提取到ETH的地址,注意:真实场景需替换
 ethFeeAddr="0x832367164346888E248bd58b9A5f480299F1e88d"
 #二层的基于zk的chain33地址，注意:非基于sep256k1的普通的chain33地址，而是基于私钥产生的可用于二层的地址,真实场景需替换
 layer2FeeAddr="2930ef48b2d018955359a77fe58a68be0c536480c57ee5a84f6c96e3ff4fa7dc"
+
 
 
 #系统中所有的fork,默认用chain33的测试网络的
@@ -356,6 +354,8 @@ ForkParaRootHash=0
 ForkParaAutonomySuperGroup=-1
 #平行链支持自由注册，主链上申请者或超级管理员或社区任其一即可注册，平行链默认开启
 ForkParaFreeRegister=0
+#主链paracross合约fork后执行自己的checkTx检查，代替drivebase的检查
+ForkParaCheckTx=0
 
 [fork.sub.evm]
 Enable=0
@@ -365,6 +365,8 @@ ForkEVMFrozen=0
 ForkEVMKVHash=0
 ForkEVMYoloV1=0
 ForkEVMTxGroup=0
+# EVM兼容base58及16进制地址混合调用处理
+ForkEVMMixAddress=0
 
 [fork.sub.blackwhite]
 Enable=0
@@ -399,6 +401,9 @@ Enable=0
 
 [fork.sub.vote]
 Enable=0
+
+[fork.sub.rollup]
+Enable=-1
 
 [fork.sub.accountmanager]
 Enable=0

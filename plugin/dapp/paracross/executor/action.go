@@ -845,7 +845,13 @@ func (a *action) procCrossTxs(status *pt.ParacrossNodeStatus) (*types.Receipt, e
 	cfg := a.api.GetConfig()
 	if enableParacrossTransfer && status.Height > 0 && isHaveCrossTxs(cfg, status) {
 		clog.Debug("paracross.Commit commitDone do cross", "height", status.Height)
-		crossTxReceipt, err := a.execCrossTxs(status)
+
+		crossTxs, crossTxResult, err := getCrossTxs(a.api, status)
+		if err != nil {
+			clog.Error("paracross.Commit getCrossTxs", "err", err.Error())
+			return nil, err
+		}
+		crossTxReceipt, err := a.execCrossTxs(status.Title, status.Height, crossTxs, crossTxResult)
 		if err != nil {
 			return nil, err
 		}
@@ -1318,6 +1324,8 @@ func isInHitHeightList(str string, status *pt.ParacrossNodeStatus) (bool, error)
 
 //命中高度
 //s: para.hit.10.100, title=user.p.para.
+//在有设置ParaCrossStatusBitMapVerLen的老版本之前，有些共识tx对应的区块没有跨链tx，分片查询很浪费时间，这里统计出来后，
+//增加到配置文件里直接忽略相应高度。采用新的BitMap版本后，主链可以根据版本号判断有没有跨链tx，没有则直接退出，不需要再去区块中检查了。
 func checkIsIgnoreHeight(heightList []string, status *pt.ParacrossNodeStatus) (bool, error) {
 	if len(heightList) <= 0 {
 		return false, nil
@@ -1380,6 +1388,8 @@ func getCrossTxsByRst(api client.QueueProtocolAPI, status *pt.ParacrossNodeStatu
 		}
 	}
 
+	//在有设置ParaCrossStatusBitMapVerLen的老版本之前，有些共识tx对应的区块没有跨链tx，分片查询很浪费时间，这里统计出来后，
+	//增加到配置文件里直接忽略相应高度。采用新的BitMap版本后，主链可以根据版本号判断有没有跨链tx，没有则直接退出，不需要再去区块中检查了。
 	//para.hit.6.8, para.ignore.1-10, 比如高度7， 如果命中则继续处理，如果没命中，检查是否在ignore列表，如果在直接退出，否则继续处理
 	//零散的命中列表可以减少忽略高度列表的范围
 	//此平行链高度在忽略检查跨链交易列表中,则直接退出
@@ -1497,22 +1507,8 @@ func getCrossTxs(api client.QueueProtocolAPI, status *pt.ParacrossNodeStatus) ([
 	return paraCrossTxs, rst, nil
 }
 
-func getCrossTxHashs(api client.QueueProtocolAPI, status *pt.ParacrossNodeStatus) ([][]byte, []byte, error) {
-	txs, crossRst, err := getCrossTxs(api, status)
-	var crossTxHashs [][]byte
-	for _, tx := range txs {
-		crossTxHashs = append(crossTxHashs, tx.Hash())
-	}
-	return crossTxHashs, crossRst, err
-}
-
-func (a *action) execCrossTxs(status *pt.ParacrossNodeStatus) (*types.Receipt, error) {
+func (a *action) execCrossTxs(title string, height int64, crossTxs []*types.Transaction, crossTxResult []byte) (*types.Receipt, error) {
 	var receipt types.Receipt
-	crossTxs, crossTxResult, err := getCrossTxs(a.api, status)
-	if err != nil {
-		clog.Error("paracross.Commit getCrossTxHashs", "err", err.Error())
-		return nil, err
-	}
 
 	for i := 0; i < len(crossTxs); i++ {
 		clog.Debug("paracross.Commit commitDone", "do cross number", i, "hash", common.ToHex(crossTxs[i].Hash()),
@@ -1521,14 +1517,14 @@ func (a *action) execCrossTxs(status *pt.ParacrossNodeStatus) (*types.Receipt, e
 			//receiptCross, err := crossTxProc(a, crossTxHashs[i], execCrossTx)
 			receiptCross, err := execCrossTxNew(a, crossTxs[i], crossTxs[i].Hash())
 			if err != nil {
-				clog.Error("paracross.Commit execCrossTx", "para title", status.Title, "para height", status.Height,
+				clog.Error("paracross.Commit execCrossTx", "para title", title, "para height", height,
 					"para tx index", i, "error", err)
 				return nil, errors.Cause(err)
 			}
 			if receiptCross == nil {
 				continue
 			}
-			clog.Debug("paracross.Commit commitDone.title ok ", "title", status.Title, "height", status.Height, "main", a.height, "i", i, "hash", common.ToHex(crossTxs[i].Hash()))
+			clog.Debug("paracross.Commit commitDone.title ok ", "title", title, "height", height, "main", a.height, "i", i, "hash", common.ToHex(crossTxs[i].Hash()))
 			receipt.KV = append(receipt.KV, receiptCross.KV...)
 			receipt.Logs = append(receipt.Logs, receiptCross.Logs...)
 		} else {
@@ -1539,14 +1535,14 @@ func (a *action) execCrossTxs(status *pt.ParacrossNodeStatus) (*types.Receipt, e
 				//receiptCross, err := crossTxProc(a, crossTxHashs[i], rollbackCrossTx)
 				receiptCross, err := rollbackCrossTxNew(a, crossTxs[i], crossTxs[i].Hash())
 				if err != nil {
-					clog.Error("paracross.Commit rollbackCrossTx", "para title", status.Title, "para height", status.Height,
+					clog.Error("paracross.Commit rollbackCrossTx", "para title", title, "para height", height,
 						"para tx index", i, "error", err)
 					return nil, errors.Cause(err)
 				}
 				if receiptCross == nil {
 					continue
 				}
-				clog.Debug("paracross.Commit commitDone.title rbk", "title", status.Title, "height", status.Height, "main", a.height, "i", i, "hash", common.ToHex(crossTxs[i].Hash()))
+				clog.Debug("paracross.Commit commitDone.title rbk", "title", title, "height", height, "main", a.height, "i", i, "hash", common.ToHex(crossTxs[i].Hash()))
 				receipt.KV = append(receipt.KV, receiptCross.KV...)
 				receipt.Logs = append(receipt.Logs, receiptCross.Logs...)
 			}

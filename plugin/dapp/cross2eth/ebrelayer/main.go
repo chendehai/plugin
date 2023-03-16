@@ -87,6 +87,7 @@ func main() {
 	chain33MsgChan2Eths := make(map[string]chan<- *events.Chain33Msg)
 	ethBridgeClaimChan := make(chan *ebrelayerTypes.EthBridgeClaim, ebrelayerTypes.ChanSize)
 	txRelayAckChan2Chain33 := make(chan *ebrelayerTypes.TxRelayAck, ebrelayerTypes.ChanSize)
+
 	txRelayAckChan2Eth := make(map[string]chan<- *ebrelayerTypes.TxRelayAck)
 
 	//启动多个以太坊系中继器
@@ -94,8 +95,8 @@ func main() {
 	for i := 0; i < ethRelayerCnt; i++ {
 		chain33MsgChan := make(chan *events.Chain33Msg, ebrelayerTypes.ChanSize)
 		chain33MsgChan2Eths[cfg.EthRelayerCfg[i].EthChainName] = chain33MsgChan
-
 		txRelayAckRecvChan := make(chan *ebrelayerTypes.TxRelayAck, ebrelayerTypes.ChanSize)
+
 		txRelayAckChan2Eth[cfg.EthRelayerCfg[i].EthChainName] = txRelayAckRecvChan
 
 		ethStartPara := &ethRelayer.EthereumStartPara{
@@ -202,12 +203,12 @@ func initCfg(path string) *relayerTypes.RelayerConfig {
 	return &cfg
 }
 
-//IsIPWhiteListEmpty ...
+// IsIPWhiteListEmpty ...
 func IsIPWhiteListEmpty() bool {
 	return len(IPWhiteListMap) == 0
 }
 
-//IsInIPWhitelist 判断ipAddr是否在ip地址白名单中
+// IsInIPWhitelist 判断ipAddr是否在ip地址白名单中
 func IsInIPWhitelist(ipAddrPort string) bool {
 	ipAddr, _, err := net.SplitHostPort(ipAddrPort)
 	if err != nil {
@@ -223,12 +224,12 @@ func IsInIPWhitelist(ipAddrPort string) bool {
 	return false
 }
 
-//RPCServer ...
+// RPCServer ...
 type RPCServer struct {
 	*rpc.Server
 }
 
-//ServeHTTP ...
+// ServeHTTP ...
 func (r *RPCServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	mainlog.Info("ServeHTTP", "request address", req.RemoteAddr)
 	if !IsIPWhiteListEmpty() {
@@ -241,24 +242,24 @@ func (r *RPCServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	r.Server.ServeHTTP(w, req)
 }
 
-//HandleHTTP ...
+// HandleHTTP ...
 func (r *RPCServer) HandleHTTP(rpcPath, debugPath string) {
 	http.Handle(rpcPath, r)
 }
 
-//HTTPConn ...
+// HTTPConn ...
 type HTTPConn struct {
 	in  io.Reader
 	out io.Writer
 }
 
-//Read ...
+// Read ...
 func (c *HTTPConn) Read(p []byte) (n int, err error) { return c.in.Read(p) }
 
-//Write ...
+// Write ...
 func (c *HTTPConn) Write(d []byte) (n int, err error) { return c.out.Write(d) }
 
-//Close ...
+// Close ...
 func (c *HTTPConn) Close() error { return nil }
 
 func startRPCServer(address string, api interface{}) {
