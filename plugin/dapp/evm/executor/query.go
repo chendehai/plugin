@@ -82,11 +82,12 @@ func (evm *EVMExecutor) Query_EstimateGas(req *evmtypes.EstimateEVMGasReq) (type
 	var lo uint64 = 21000
 	var hi uint64 = evmtypes.MaxGasLimit
 	var cap = hi
+	execAddr := evm.getEvmExecAddress()
 	// 创建EVM运行时对象
 	env := runtime.NewEVM(evm.NewEVMContext(msg, tx.Hash()), evm.mStateDB, *evm.vmCfg, evm.GetAPI().GetConfig())
-	isTransferOnly := strings.Compare(msg.To().String(), EvmAddress) == 0 && 0 == len(msg.Data())
+	isTransferOnly := strings.Compare(msg.To().String(), execAddr) == 0 && 0 == len(msg.Data())
 	//coins转账，para数据作为备注交易
-	isTransferNote := strings.Compare(msg.To().String(), EvmAddress) != 0 && !env.StateDB.Exist(msg.To().String()) && len(msg.Para()) > 0 && msg.Value() != 0
+	isTransferNote := strings.Compare(msg.To().String(), execAddr) != 0 && !env.StateDB.Exist(msg.To().String()) && len(msg.Para()) > 0 && msg.Value() != 0
 	//如果是普通转账或者带有备注的Coins 转账 则直接返回
 	if isTransferOnly || isTransferNote {
 		result := &evmtypes.EstimateEVMGasResp{}
@@ -144,7 +145,7 @@ func (evm *EVMExecutor) Query_EstimateGas(req *evmtypes.EstimateEVMGasReq) (type
 		ldb.ResetCache()
 		sdb := evm.mStateDB.StateDB.(*executor.StateDB)
 		sdb.ResetCache()
-		if err != nil {
+		if err != nil && count == 1 { //第一次执行出错，停止估算
 			return nil, err
 		}
 		if !ok { //如果!ok 说明GaS 不够用，则把上一轮计算的mid gas 赋值给low gas, 进而提高mid gas 的值
