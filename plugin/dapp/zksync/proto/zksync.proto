@@ -2,26 +2,33 @@ syntax = "proto3";
 import "witness.proto";
 import "common.proto";
 import "transaction.proto";
+import "exchange.proto";
 
 package types;
 option go_package = "../types";
 
 message ZksyncAction {
   oneof value {
-    ZkDeposit  deposit          = 1;
-    ZkWithdraw zkWithdraw         = 2;
+    ZkDeposit  deposit              = 1;
+    ZkWithdraw zkWithdraw           = 2;
     ZkTransfer zkTransfer           = 3;
-    ZkTransferToNew transferToNew = 4;
-    ZkProxyExit proxyExit         = 5;
-    ZkSetPubKey setPubKey         = 6;
-    ZkFullExit  fullExit          = 7;
-    ZkSwap  swap                  = 8;
-    ZkContractToTree contractToTree = 9;
-    ZkTreeToContract treeToContract = 10;
+    ZkTransferToNew transferToNew   = 4;
+    ZkProxyExit proxyExit           = 5;
+    ZkSetPubKey setPubKey           = 6;
+    ZkFullExit  fullExit            = 7;
+    ZkContractToTree contractToTree = 8;
+    ZkTreeToContract treeToContract = 9;
 
-    ZkMintNFT     mintNFT       = 12;
-    ZkWithdrawNFT withdrawNFT   = 13;
-    ZkTransferNFT transferNFT   = 14;
+    ZkMintNFT     mintNFT           = 12;
+    ZkWithdrawNFT withdrawNFT       = 13;
+    ZkTransferNFT transferNFT       = 14;
+
+    //现货交易
+    ZkSpotTrade spotTrade            = 20;
+    //取消交易
+    ZkRevokeTrade revokeTrade        = 21;
+    //将资产在l2账户和现货账户，永续合约账户之间进行划转
+    ZkTransfer2Ex transfer2Ex        = 22;
 
     ZkVerifyKey         setVerifyKey = 31;
     ZkCommitProof       commitProof  = 32;
@@ -35,7 +42,7 @@ message ZksyncAction {
     types.AssetsTransferToExec  transferToExec  = 42;
   }
 
-  int32 ty = 15;
+  int32 ty = 50;
 }
 
 message ZkTokenSymbol {
@@ -178,9 +185,31 @@ message ZkFullExit {
 }
 
 message ZkSwap {
+
   ZkSignature signature = 1;
 }
 
+//限价订单
+message ZkSpotTrade {
+  SpotTradeInfo spotTradeInfo = 1;
+  ZkSignature signature = 2;
+}
+
+//撤回订单
+message ZkRevokeTrade {
+  //订单号
+  int64 orderID         = 1;
+  ZkSignature signature = 2;
+}
+
+//在l2账户树，现货账户和永续合约账户之间进行资产的划转
+message ZkTransfer2Ex {
+  uint64 tokenID        = 1;
+  string amount         = 2;
+  uint64 fromAccountId  = 3;
+  uint32   destination   = 4;
+  ZkSignature signature = 5;
+}
 
 message ZkMintNFT {
   uint64 fromAccountId = 1;
