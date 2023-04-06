@@ -5,13 +5,17 @@ import "witness.proto";
 package types;
 option go_package = "../types";
 
+message delta {
+    string before = 1;
+    string after  = 2;
+}
 message AccountTokenBalanceReceipt {
     uint64 accountId      = 1; //accountId其实就是叶子的totalIndex
     string ethAddress     = 2; //账户对应的以太坊地址
     string chain33Addr    = 3; //chain33地址
     uint64 tokenId        = 4; //叶子下拥有的tokenId
-    string balanceBefore  = 5;
-    string balanceAfter   = 6;
+    delta balanceDelta    = 5;
+    delta frozenDelta     = 6;
 }
 
 message TransferReceipt4l2 {

@@ -76,15 +76,25 @@ func (a *Action) ZkSpotTrade(payload *zt.ZkSpotTrade) (*types.Receipt, error) {
 }
 
 func (a *Action) ZkRevokeTrade(payload *zt.ZkRevokeTrade) (*types.Receipt, error) {
-
-	//此处的decimal无用
-	return a.l2TransferProc(payload, actionTy, 18)
+	return nil, nil
 }
 
-func (a *Action) ZkTransfer2Ex(payload *zt.ZkTransfer2Ex) (*types.Receipt, error) {
+func (a *Action) ZkTransfer2Ex(payload *zt.ZkTransfer2Ex, actionTy int32) (*types.Receipt, error) {
+	if actionTy != zt.TyTransfer2Trade && actionTy != zt.TyTransferFromTrade {
+		return nil, errors.New("Neigher TyTransfer2Trade nor TyTransferFromTrade")
+	}
 
-	//此处的decimal无用
-	return a.l2TransferProc(payload, actionTy, 18)
+	fromAccountId := payload.FromAccountId
+	if actionTy == zt.TyTransferFromTrade {
+		fromAccountId = fromAccountId | zt.SpotTradeTokenFlag
+	}
+	para := &transfer2TradePara{
+		FromAccountId: fromAccountId,
+		FromTokenId:   payload.TokenID,
+		Amount:        payload.Amount,
+	}
+
+	return a.transfer2Trade(para)
 }
 
 // set the transaction logic method
@@ -278,6 +288,24 @@ func (a *Action) matchLimitOrder(tradeInfo *zt.SpotTradeInfo) (*types.Receipt, e
 	return receipts, nil
 }
 
+func freezeOrUnfreezeToken(from, tokenID uint64, amount string, option int32, statedb dbm.KV) (*types.Receipt, error) {
+	if option != zt.UnFreeze || option != zt.Freeze {
+		return nil, errors.New("Only opertion freeze and unfreeze is supported")
+	}
+
+	leaf, err := GetLeafByAccountId(statedb, from)
+	if nil != err {
+		return nil, err
+	}
+
+	updateKVs, log, _, err := applyL2AccountUpdate(leaf.AccountId, tokenID, amount, option, statedb, leaf, false, zt.FromActive)
+	if nil != err {
+		return nil, errors.Wrapf(err, "applyL2AccountUpdate")
+	}
+	receipt := &types.Receipt{Ty: types.ExecOk, KV: updateKVs, Logs: []*types.ReceiptLog{log}}
+	return receipt, nil
+}
+
 func (a *Action) matchModel(leftTokenID, rightTokenID uint32, payload *zt.SpotTradeInfo, matchorder *zt.Order, or *zt.Order, re *zt.ReceiptExchange, feeAddr string, taker int32) ([]*types.ReceiptLog, []*types.KeyValue, error) {
 	var logs []*types.ReceiptLog
 	var kvs []*types.KeyValue
@@ -293,13 +321,15 @@ func (a *Action) matchModel(leftTokenID, rightTokenID uint32, payload *zt.SpotTr
 		matchorder.Addr, "amount", matched, "price", payload.Price)
 
 	cfg := a.api.GetConfig()
-	var receipt *types.Receipt
+	var receipts *types.Receipt
 	var err error
+	var ops []*zt.ZkOperation
 	if payload.Op == zt.OpSell {
 		//Transfer of frozen assets
 		//如果发起交易是出售资产
 		//TODO:关于数量的处理，需要统一考虑 by Hezhenghun on 4.4 2023
 		amount := calcActualCost(matchorder.GetSpotTradeInfo().Op, matched, matchorder.GetSpotTradeInfo().Price, cfg.GetCoinPrecision())
+		methodName := ""
 		if matchorder.Addr != a.fromaddr {
 			//如果对手方和发起方为不同的地址，则将冻结的资产（即划入交易账户的资产）转账到出售方（即通过基础货币进行支付）支付Ｕ
 			transferPara := &zt.ZkTransfer{
@@ -308,35 +338,45 @@ func (a *Action) matchModel(leftTokenID, rightTokenID uint32, payload *zt.SpotTr
 				FromAccountId: matchorder.GetSpotTradeInfo().FromAccountID,
 				ToAccountId:   payload.FromAccountID,
 			}
-			receipt, err = a.l2TransferProc(transferPara, zt.TySpotTradeTakerTransfer, 18, zt.FromFrozen)
+			receipts, err = a.l2TransferProc(transferPara, zt.TySpotTradeTakerTransfer, 18, zt.FromFrozen)
+			methodName = "l2TransferProc"
 			//receipt, err = rightAccountDB.ExecTransferFrozen(matchorder.Addr, a.fromaddr, a.execaddr, amount)
 		} else {
-			receipt, err = rightAccountDB.ExecActive(a.fromaddr, a.execaddr, amount)
+			//receipt, err = rightAccountDB.ExecActive(a.fromaddr, a.execaddr, amount)
+			receipts, err = freezeOrUnfreezeToken(payload.FromAccountID, uint64(rightTokenID|zt.SpotTradeTokenFlag), big.NewInt(amount).String(), zt.UnFreeze, a.statedb)
+			methodName = "freezeOrUnfreezeToken"
 		}
 		if err != nil {
-			zlog.Error("matchModel.ExecTransferFrozen", "from", matchorder.Addr, "to", a.fromaddr, "amount", amount, "err", err)
+			zlog.Error("matchModel", "methodName", methodName, "from", matchorder.Addr, "to", a.fromaddr, "amount", amount, "err", err)
 			return nil, nil, err
 		}
-		logs = append(logs, receipt.Logs...)
-		kvs = append(kvs, receipt.KV...)
+		ops = append(ops, &zt.ZkOperation{Ty: zt.TySpotTradeTakerTransfer, Op: &zt.OperationSpecialInfo{Value: &zt.OperationSpecialInfo_TransferToNew{TransferToNew: special}}})
 
 		//Charge fee
 		activeFee := calcMtfFee(amount, taker) //Transaction fee of the active party
 		if activeFee != 0 {
-			receipt, err = rightAccountDB.ExecTransfer(a.fromaddr, feeAddr, a.execaddr, activeFee)
+
+			feeReceipt, feeQueue, err := a.MakeFeeLog(new(big.Int).SetInt64(activeFee).String(), uint64(rightTokenID|zt.SpotTradeTokenFlag))
 			if err != nil {
-				zlog.Error("matchModel.ExecTransfer sell", "from", a.fromaddr, "to", feeAddr,
-					"amount", amount, "rate", taker, "activeFee", activeFee, "err", err.Error())
-				return nil, nil, err
+				return nil, nil, errors.Wrapf(err, "MakeFeeLog")
 			}
 			or.DigestedFee += activeFee
-			logs = append(logs, receipt.Logs...)
-			kvs = append(kvs, receipt.KV...)
+
+			ops = append(ops, feeQueue)
+			receipts = mergeReceipt(receipts, feeReceipt)
 		}
 
 		//The settlement of the corresponding assets for the transaction to be concluded
 		amount = calcActualCost(payload.Op, matched, matchorder.GetSpotTradeInfo().Price, cfg.GetCoinPrecision())
 		if a.fromaddr != matchorder.Addr {
+			transferPara := &zt.ZkTransfer{
+				TokenId:       uint64(rightTokenID),
+				Amount:        big.NewInt(amount).String(),
+				FromAccountId: matchorder.GetSpotTradeInfo().FromAccountID,
+				ToAccountId:   payload.FromAccountID,
+			}
+			receipts, err = a.l2TransferProc(transferPara, zt.TySpotTradeMakerTransfer, 18, zt.FromFrozen)
+
 			receipt, err = leftAccountDB.ExecTransfer(a.fromaddr, matchorder.Addr, a.execaddr, amount)
 			if err != nil {
 				zlog.Error("matchModel.ExecTransfer", "from", a.fromaddr, "to", matchorder.Addr, "amount", amount, "err", err.Error())
@@ -452,6 +492,13 @@ func (a *Action) matchModel(leftTokenID, rightTokenID uint32, payload *zt.SpotTr
 
 	re.Order = or
 	re.MatchOrders = append(re.MatchOrders, matchorder)
+
+	r, _, err := setL2QueueData(a.statedb, ops)
+	if err != nil {
+		return nil, nil, err
+	}
+	receipts = mergeReceipt(receipts, r)
+
 	return logs, kvs, nil
 }
 

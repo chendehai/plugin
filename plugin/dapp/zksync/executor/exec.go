@@ -33,6 +33,37 @@ func (z *zksync) Exec_ZkTransfer(payload *zt.ZkTransfer, tx *types.Transaction, 
 	return action.ZkTransfer(payload, zt.TyTransferAction)
 }
 
+func (z *zksync) Exec_ZkSpotTrade(payload *zt.ZkSpotTrade, tx *types.Transaction, index int) (*types.Receipt, error) {
+	action := NewAction(z, tx, index)
+	//系统设置exodus mode后，则不处理此类交易
+	if err := isExodusMode(z.GetStateDB()); err != nil {
+		return nil, err
+	}
+	return action.ZkSpotTrade(payload)
+}
+
+func (z *zksync) Exec_ZkRevokeTrade(payload *zt.ZkRevokeTrade, tx *types.Transaction, index int) (*types.Receipt, error) {
+	action := NewAction(z, tx, index)
+	//系统设置exodus mode后，则不处理此类交易
+	if err := isExodusMode(z.GetStateDB()); err != nil {
+		return nil, err
+	}
+	return action.ZkRevokeTrade(payload)
+}
+
+func (z *zksync) Exec_ZkTransfer2Ex(payload *zt.ZkTransfer2Ex, tx *types.Transaction, index int) (*types.Receipt, error) {
+	action := NewAction(z, tx, index)
+	//系统设置exodus mode后，则不处理此类交易
+	if err := isExodusMode(z.GetStateDB()); err != nil {
+		return nil, err
+	}
+	zkAction := new(zt.ZksyncAction)
+	if err := types.Decode(tx.Payload, zkAction); err != nil {
+		return nil, err
+	}
+	return action.ZkTransfer2Ex(payload, zkAction.GetTy())
+}
+
 func (z *zksync) Exec_TransferToNew(payload *zt.ZkTransferToNew, tx *types.Transaction, index int) (*types.Receipt, error) {
 	action := NewAction(z, tx, index)
 	//系统设置exodus mode后，则不处理此类交易
@@ -135,26 +166,26 @@ func (z *zksync) Exec_TransferNFT(payload *zt.ZkTransferNFT, tx *types.Transacti
 	return action.transferNFT(payload)
 }
 
-//Exec_SetExodusMode
+// Exec_SetExodusMode
 func (z *zksync) Exec_SetExodusMode(payload *zt.ZkExodusMode, tx *types.Transaction, index int) (*types.Receipt, error) {
 	action := NewAction(z, tx, index)
 	return action.setExodusMode(payload)
 }
 
-//zksync作为2层链的数字资产的发行合约，需要支持以下3种类型的资产操作
-//Exec_Transfer exec asset transfer process
+// zksync作为2层链的数字资产的发行合约，需要支持以下3种类型的资产操作
+// Exec_Transfer exec asset transfer process
 func (z *zksync) Exec_Transfer(payload *types.AssetsTransfer, tx *types.Transaction, index int) (*types.Receipt, error) {
 	action := NewAction(z, tx, index)
 	return action.AssetTransfer(payload, tx, index)
 }
 
-//Exec_Withdraw exec asset withdraw
+// Exec_Withdraw exec asset withdraw
 func (z *zksync) Exec_Withdraw(payload *types.AssetsWithdraw, tx *types.Transaction, index int) (*types.Receipt, error) {
 	action := NewAction(z, tx, index)
 	return action.AssetWithdraw(payload, tx, index)
 }
 
-//Exec_TransferToExec exec transfer asset，在平行链上payload里面的ExecName应该是title+Exec，command里面会自动加上，rpc需要注意添加
+// Exec_TransferToExec exec transfer asset，在平行链上payload里面的ExecName应该是title+Exec，command里面会自动加上，rpc需要注意添加
 func (z *zksync) Exec_TransferToExec(payload *types.AssetsTransferToExec, tx *types.Transaction, index int) (*types.Receipt, error) {
 	action := NewAction(z, tx, index)
 	return action.AssetTransferToExec(payload, tx, index)

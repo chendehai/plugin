@@ -51,11 +51,27 @@ message ZkTokenSymbol {
   uint32 decimal = 3;
 }
 
-//某个token的余额
-message TokenBalance {
+//单个账户token总的余额,包括TokenBalance+Token4trade,即资金账户和交易账户的总额
+message Token4ZkpWitness {
   uint64 tokenId = 1;
   string balance = 2;
   bytes tokenHash = 3;
+}
+
+//某个token的余额，表示资金账户的余额
+message TokenBalance {
+  uint64 tokenId  = 1;
+  string balance  = 2;
+  string frozen   = 3;
+  bytes tokenHash = 4;
+}
+
+//某个token交易账户的余额（包括balance+frozen这2部分组成）
+message Token4trade {
+  uint64 tokenId  = 1;
+  string balance  = 2;
+  string frozen   = 3;
+  bytes tokenHash = 4;
 }
 
 message AccountTree {
@@ -98,9 +114,6 @@ message SubTree {
   bytes rootHash = 2; //子树的根hash
 }
 
-
-
-
 message ZkDeposit {
   uint64 tokenId = 1;
   string amount = 2;
@@ -108,7 +121,6 @@ message ZkDeposit {
   string chain33Addr = 4;
   int64  l1PriorityId = 5; //需要在合约保证id连续
   ZkSignature signature = 6;
-
 }
 
 message ZkWithdraw {
@@ -207,8 +219,7 @@ message ZkTransfer2Ex {
   uint64 tokenID        = 1;
   string amount         = 2;
   uint64 fromAccountId  = 3;
-  uint32   destination   = 4;
-  ZkSignature signature = 5;
+  ZkSignature signature = 4;
 }
 
 message ZkMintNFT {

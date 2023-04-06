@@ -41,7 +41,7 @@ func getCfgFeeAddr(cfg *types.Chain33Config) (string, string) {
 	return ethAddrDecimal, chain33AddrDecimal
 }
 
-//由于ethAddr+chain33Addr 唯一确定一个accountId,所以设置初始账户的chain33Addr不相同
+// 由于ethAddr+chain33Addr 唯一确定一个accountId,所以设置初始账户的chain33Addr不相同
 func getInitAccountLeaf(ethFeeAddr, chain33FeeAddr string) []*zt.Leaf {
 	zeroHash := zt.Str2Byte("0")
 	defaultAccount := &zt.Leaf{
@@ -79,7 +79,7 @@ func getInitAccountLeaf(ethFeeAddr, chain33FeeAddr string) []*zt.Leaf {
 	return []*zt.Leaf{defaultAccount, feeAccount, NFTAccount, treeToContractAccount}
 }
 
-//获取系统初始root，如果未设置fee账户，缺省采用配置文件，
+// 获取系统初始root，如果未设置fee账户，缺省采用配置文件，
 func getInitTreeRoot(cfg *types.Chain33Config, ethAddrDecimal, layer2AddrDecimal string) string {
 	var feeEth, fee33 string
 	if len(ethAddrDecimal) > 0 && len(layer2AddrDecimal) > 0 {
@@ -166,17 +166,16 @@ func NewInitAccount(ethFeeAddr, chain33FeeAddr string) ([]*types.KeyValue, error
 	return kvs, nil
 }
 
-func updateTokenBalance(accountId uint64, tokenId uint64, amount string, option int32, statedb dbm.KV) (*types.KeyValue, *balancehistory, error) {
+func updateTokenBalance(accountId uint64, tokenId uint64, amount string, option int32, statedb dbm.KV, tokenSource zt.TokenSource) (*types.KeyValue, *zt.AccountTokenBalanceReceipt, error) {
 	token, err := GetTokenByAccountIdAndTokenId(statedb, accountId, tokenId)
 	if err != nil {
 		return nil, nil, errors.Wrapf(err, "updateTokenBalance.GetTokenByAccountIdAndTokenId")
 	}
 
-	balanceInfoPtr := &balancehistory{}
-
+	receipt := &zt.AccountTokenBalanceReceipt{}
 	if token == nil {
-		if option == zt.Sub {
-			return nil, nil, errors.Errorf("token not exist with Id=%d", tokenId)
+		if option == zt.Sub || zt.Freeze == option || zt.UnFreeze == option {
+			return nil, nil, errors.Errorf("token not exist with Id=%d for option=%d", tokenId, option)
 		} else {
 			token = &zt.TokenBalance{
 				TokenId: tokenId,
@@ -186,24 +185,87 @@ func updateTokenBalance(accountId uint64, tokenId uint64, amount string, option 
 			if accountId == zt.SystemNFTAccountId && tokenId == zt.SystemNFTTokenId {
 				token.Balance = new(big.Int).SetUint64(zt.SystemNFTTokenId + 2).String()
 			}
-			balanceInfoPtr.before = "0"
-			balanceInfoPtr.after = token.Balance
+			receipt.BalanceDelta = &zt.Delta{
+				Before: "0",
+				After:  token.Balance,
+			}
 		}
 	} else {
 		balance, _ := new(big.Int).SetString(token.GetBalance(), 10)
+		frozen, _ := new(big.Int).SetString(token.Frozen, 10)
 		delta, _ := new(big.Int).SetString(amount, 10)
-		balanceInfoPtr.before = token.GetBalance()
-		if option == zt.Add {
+
+		switch option {
+		case zt.Add:
+			before := token.GetBalance()
 			token.Balance = new(big.Int).Add(balance, delta).String()
-		} else {
+			receipt.BalanceDelta = &zt.Delta{
+				Before: before,
+				After:  token.Balance,
+			}
+		case zt.Sub:
+			if zt.FromFrozen == tokenSource {
+				before := token.Frozen
+				if frozen.Cmp(delta) < 0 {
+					return nil, nil, errors.Wrapf(types.ErrNotAllow, "amount=%d,tokenId=%d,frozen=%s less sub amoumt=%s",
+						accountId, tokenId, frozen, amount)
+				}
+				token.Frozen = new(big.Int).Sub(frozen, delta).String()
+				receipt.FrozenDelta = &zt.Delta{
+					Before: before,
+					After:  token.Frozen,
+				}
+
+			} else {
+				if balance.Cmp(delta) < 0 {
+					return nil, nil, errors.Wrapf(types.ErrNotAllow, "amount=%d,tokenId=%d,balance=%s less sub amoumt=%s",
+						accountId, tokenId, balance, amount)
+				}
+				before := token.GetBalance()
+				token.Balance = new(big.Int).Sub(balance, delta).String()
+				receipt.BalanceDelta = &zt.Delta{
+					Before: before,
+					After:  token.Balance,
+				}
+			}
+		case zt.Freeze:
 			if balance.Cmp(delta) < 0 {
 				return nil, nil, errors.Wrapf(types.ErrNotAllow, "amount=%d,tokenId=%d,balance=%s less sub amoumt=%s",
 					accountId, tokenId, balance, amount)
 			}
-			token.Balance = new(big.Int).Sub(balance, delta).String()
-		}
+			balanceBefore := token.Balance
+			frozenBefore := token.Frozen
 
-		balanceInfoPtr.after = token.Balance
+			token.Balance = new(big.Int).Sub(balance, delta).String()
+			token.Frozen = new(big.Int).Add(balance, delta).String()
+
+			receipt.FrozenDelta = &zt.Delta{
+				Before: frozenBefore,
+				After:  token.Frozen,
+			}
+			receipt.BalanceDelta = &zt.Delta{
+				Before: balanceBefore,
+				After:  token.Balance,
+			}
+
+		case zt.UnFreeze:
+			if frozen.Cmp(delta) < 0 {
+				return nil, nil, errors.Wrapf(types.ErrNotAllow, "amount=%d,tokenId=%d,frozen=%s less sub amoumt=%s",
+					accountId, tokenId, frozen, amount)
+			}
+			balanceBefore := token.Balance
+			frozenBefore := token.Frozen
+			token.Balance = new(big.Int).Add(balance, delta).String()
+			token.Frozen = new(big.Int).Sub(frozen, delta).String()
+			receipt.FrozenDelta = &zt.Delta{
+				Before: frozenBefore,
+				After:  token.Frozen,
+			}
+			receipt.BalanceDelta = &zt.Delta{
+				Before: balanceBefore,
+				After:  token.Balance,
+			}
+		}
 	}
 
 	kv := &types.KeyValue{
@@ -211,7 +273,7 @@ func updateTokenBalance(accountId uint64, tokenId uint64, amount string, option 
 		Value: types.Encode(token),
 	}
 
-	return kv, balanceInfoPtr, nil
+	return kv, receipt, nil
 }
 
 func AddNewLeafOpt(ethAddress string, tokenId, accountId uint64, amount string, chain33Addr string) []*types.KeyValue {
@@ -278,29 +340,27 @@ func updateLeafOpt(statedb dbm.KV, leaf *zt.Leaf, tokenId uint64, option int32) 
 	return kvs, nil
 }
 
-func applyL2AccountUpdate(accountID, tokenID uint64, amount string, option int32, statedb dbm.KV, leaf *zt.Leaf, makeEncode bool) ([]*types.KeyValue, *types.ReceiptLog, *zt.AccountTokenBalanceReceipt, error) {
+func applyL2AccountUpdate(accountID, tokenID uint64, amount string, option int32, statedb dbm.KV, leaf *zt.Leaf, makeEncode bool, tokenSource zt.TokenSource) ([]*types.KeyValue, *types.ReceiptLog, *zt.AccountTokenBalanceReceipt, error) {
 	var kvs []*types.KeyValue
 	var log *types.ReceiptLog
-	balancekv, balanceHistory, err := updateTokenBalance(accountID, tokenID, amount, option, statedb)
+	balancekv, l2Log, err := updateTokenBalance(accountID, tokenID, amount, option, statedb, tokenSource)
 	if nil != err {
 		return nil, nil, nil, err
 	}
 	kvs = append(kvs, balancekv)
 
-	updateLeafKvs, err := updateLeafOpt(statedb, leaf, tokenID, zt.Add)
+	//todo: 大部分时候是不需要更新leaf的，需要重新check一下这个操作 by Hezhengjun on 0406 2023
+	updateLeafKvs, err := updateLeafOpt(statedb, leaf, tokenID, option)
 	if nil != err {
 		return nil, nil, nil, err
 	}
 
 	kvs = append(kvs, updateLeafKvs...)
 
-	l2Log := &zt.AccountTokenBalanceReceipt{}
 	l2Log.EthAddress = leaf.EthAddress
 	l2Log.Chain33Addr = leaf.Chain33Addr
 	l2Log.TokenId = tokenID
 	l2Log.AccountId = accountID
-	l2Log.BalanceBefore = balanceHistory.before
-	l2Log.BalanceAfter = balanceHistory.after
 
 	if makeEncode {
 		log = &types.ReceiptLog{
@@ -330,8 +390,10 @@ func applyL2AccountCreate(accountID, tokenID uint64, amount, ethAddress, chain33
 	l2Log.Chain33Addr = chain33Addr
 	l2Log.TokenId = tokenID
 	l2Log.AccountId = accountID
-	l2Log.BalanceBefore = "0"
-	l2Log.BalanceAfter = amount
+	l2Log.BalanceDelta = &zt.Delta{
+		Before: "0",
+		After:  amount,
+	}
 
 	//为了避免不必要的计算，在transfer等场景中，该操作在函数外部进行
 	if makeEncode {

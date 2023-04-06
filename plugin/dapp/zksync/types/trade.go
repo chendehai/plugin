@@ -6,18 +6,11 @@ const (
 	OpSell
 )
 
-//order status
+// order status
 const (
 	Ordered = iota
 	Completed
 	Revoked
-)
-
-//const
-const (
-	ListDESC = int32(0)
-	ListASC  = int32(1)
-	ListSeek = int32(2)
 )
 
 const (

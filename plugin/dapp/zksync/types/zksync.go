@@ -38,6 +38,11 @@ const (
 	//纯特殊电路类型，非Zksync合约使用的action
 	TyContractToTreeNewAction = 30 //合约账户转入新的叶子
 
+	TySpotTradeTakerTransfer = 40 //taker 转账
+	TySpotTradeMakerTransfer = 41 //maker 转账
+	TyTransfer2Trade         = 42 //将资产转入交易账户
+	TyTransferFromTrade      = 43 //将资产从交易账户转出到资金账户
+
 	//非电路action
 	TySetVerifyKeyAction   = 102 //设置电路验证key
 	TyCommitProofAction    = 103 //提交zk proof
@@ -123,24 +128,26 @@ const (
 	ListASC  = int32(1)
 	ListSeek = int32(2)
 
-	Add = int32(0)
-	Sub = int32(1)
+	Add      = int32(0)
+	Sub      = int32(1)
+	Freeze   = int32(2)
+	UnFreeze = int32(3)
 
 	MaxDecimalAllow = 18
 	MinDecimalAllow = 4
 )
 
-//Zksync 执行器名称定义
+// Zksync 执行器名称定义
 const Zksync = "zksync"
 const ZkManagerKey = "manager"
 const ZkMimcHashSeed = "seed"
 const ZkVerifierKey = "verifier"
 
-//配置的系统收交易费账户
+// 配置的系统收交易费账户
 const ZkCfgEthFeeAddr = "ethFeeAddr"
 const ZkCfgLayer2FeeAddr = "layer2FeeAddr"
 
-//msg宽度
+// msg宽度
 const (
 	TxTypeBitWidth    = 8  //1byte
 	AccountBitWidth   = 32 //4byte
@@ -169,7 +176,7 @@ const (
 
 )
 
-//不同type chunk数量
+// 不同type chunk数量
 const (
 	DepositChunks          = 3
 	Contract2TreeChunks    = 2
@@ -202,9 +209,13 @@ const (
 	//SystemNFTTokenId 作为一个NFT token标记 低于NFTTokenId 为FT token id, 高于NFTTokenId为 NFT token id，即从NFTTokenId+1开始作为NFT资产
 	SystemNFTTokenId = 256 //2^8,
 
+	//TokenPathDepth 支持的资产种类数量
+	TokenPathDepth                = 4                             //支持token数为 2^(depth-1)
+	SpotTradeTokenFlag            = (0x1 << TokenPathDepth)       //现货资产高位token ID
+	ForeverContractTradeTokenFlag = (0x1 << (TokenPathDepth + 1)) //永续合约高位token ID
 )
 
-//ERC protocol
+// ERC protocol
 const (
 	ZKERC1155 = 1
 	ZKERC721  = 2
@@ -227,7 +238,13 @@ const (
 const (
 	ModeValNo  = 0 //
 	ModeValYes = 1 //
+)
 
+type TokenSource int
+
+const (
+	FromFrozen TokenSource = 0
+	FromActive TokenSource = 1
 )
 
 var (
@@ -326,12 +343,12 @@ func InitExecutor(cfg *types.Chain33Config) {
 	types.RegistorExecutor(Zksync, NewType(cfg))
 }
 
-//ZksyncType ...
+// ZksyncType ...
 type ZksyncType struct {
 	types.ExecTypeBase
 }
 
-//NewType ...
+// NewType ...
 func NewType(cfg *types.Chain33Config) *ZksyncType {
 	c := &ZksyncType{}
 	c.SetChild(c)
