@@ -43,36 +43,7 @@ func (a *Action) ZkSpotTrade(payload *zt.ZkSpotTrade) (*types.Receipt, error) {
 		return nil, zt.ErrAssetOp
 	}
 
-	//leftAssetDB, err := account.NewAccountDB(cfg, leftTokenID.GetExecer(), leftTokenID.GetSymbol(), a.statedb)
-	//if err != nil {
-	//	return nil, err
-	//}
-	//rightAssetDB, err := account.NewAccountDB(cfg, rightTokenID.GetExecer(), rightTokenID.GetSymbol(), a.statedb)
-	//if err != nil {
-	//	return nil, err
-	//}
-
-	//Check your account balance first
-	if tradeInfo.GetOp() == et.OpBuy {
-		amount := safeMul(tradeInfo.GetAmount(), tradeInfo.GetPrice(), cfg.GetCoinPrecision())
-		rightAccount := rightAssetDB.LoadExecAccount(a.fromaddr, a.execaddr)
-		if rightAccount.Balance < amount {
-			zlog.Error("limit check right balance", "addr", a.fromaddr, "avail", rightAccount.Balance, "need", amount)
-			return nil, et.ErrAssetBalance
-		}
-		return a.matchLimitOrder(tradeInfo)
-
-	}
-	if tradeInfo.GetOp() == et.OpSell {
-		amount := tradeInfo.GetAmount()
-		leftAccount := leftAssetDB.LoadExecAccount(a.fromaddr, a.execaddr)
-		if leftAccount.Balance < amount {
-			zlog.Error("limit check left balance", "addr", a.fromaddr, "avail", leftAccount.Balance, "need", amount)
-			return nil, et.ErrAssetBalance
-		}
-		return a.matchLimitOrder(tradeInfo, leftAssetDB, rightAssetDB, entrustAddr)
-	}
-	return nil, fmt.Errorf("unknow op")
+	return a.matchLimitOrder(tradeInfo)
 }
 
 func (a *Action) ZkRevokeTrade(payload *zt.ZkRevokeTrade) (*types.Receipt, error) {
@@ -217,7 +188,7 @@ func (a *Action) matchLimitOrder(tradeInfo *zt.SpotTradeInfo) (*types.Receipt, e
 						}
 						continue
 					}
-					log, kv, err := a.matchModel(leftTokenID, rightTokenID, tradeInfo, order, or, re, tCfg.GetFeeAddr(), taker) // payload, or redundant
+					log, kv, err := a.matchModel(leftTokenID, rightTokenID, tradeInfo, order, or, re, taker) // payload, or redundant
 					if err != nil {
 						if err == types.ErrNoBalance {
 							zlog.Warn("matchModel RevokeOrder", "height", a.height, "orderID", order.GetOrderID(), "payloadID", or.GetOrderID(), "error", err)
@@ -242,7 +213,7 @@ func (a *Action) matchLimitOrder(tradeInfo *zt.SpotTradeInfo) (*types.Receipt, e
 				orderKey = orderList.PrimaryKey
 			}
 			if !hasOrder {
-				var matchorder et.Order
+				var matchorder zt.Order
 				matchorder.UpdateTime = a.blocktime
 				matchorder.Status = et.Completed
 				matchorder.Balance = 0
@@ -260,27 +231,31 @@ func (a *Action) matchLimitOrder(tradeInfo *zt.SpotTradeInfo) (*types.Receipt, e
 	}
 
 	//Outstanding orders require freezing of the remaining unclosed funds
+	//根据未成交数量锁定相应的资产
 	if tradeInfo.Op == et.OpBuy {
+		//如果发起方是购买，则冻结usdt资产
 		amount := calcActualCost(et.OpBuy, or.Balance, tradeInfo.Price, cfg.GetCoinPrecision())
-		receipt, err := rightAccountDB.ExecFrozen(a.fromaddr, a.execaddr, amount)
+		receipt, err := freezeOrUnfreezeToken(tradeInfo.FromAccountID, uint64(rightTokenID|zt.SpotTradeTokenFlag), big.NewInt(amount).String(), zt.Freeze, a.statedb)
 		if err != nil {
-			zlog.Error("LimitOrder.ExecFrozen OpBuy", "addr", a.fromaddr, "amount", amount, "err", err.Error())
+			zlog.Error("matchLimitOrder.freezeOrUnfreezeToken", "FromAccountID", tradeInfo.FromAccountID, "amount", amount, "err", err)
 			return nil, err
 		}
+
 		logs = append(logs, receipt.Logs...)
 		kvs = append(kvs, receipt.KV...)
 	}
 	if tradeInfo.Op == et.OpSell {
+		//如果发起方是出售，则冻结eth资产
 		amount := calcActualCost(et.OpSell, or.Balance, tradeInfo.Price, cfg.GetCoinPrecision())
-		receipt, err := leftAccountDB.ExecFrozen(a.fromaddr, a.execaddr, amount)
+		receipt, err := freezeOrUnfreezeToken(tradeInfo.FromAccountID, uint64(leftTokenID|zt.SpotTradeTokenFlag), big.NewInt(amount).String(), zt.Freeze, a.statedb)
 		if err != nil {
-			zlog.Error("LimitOrder.ExecFrozen OpSell", "addr", a.fromaddr, "amount", amount, "err", err.Error())
+			zlog.Error("matchLimitOrder.freezeOrUnfreezeToken", "FromAccountID", tradeInfo.FromAccountID, "amount", amount, "err", err)
 			return nil, err
 		}
 		logs = append(logs, receipt.Logs...)
 		kvs = append(kvs, receipt.KV...)
 	}
-	kvs = append(kvs, a.GetKVSet(or)...)
+	kvs = append(kvs, getKVSet(or)...)
 	re.Order = or
 	receiptlog := &types.ReceiptLog{Ty: et.TyLimitOrderLog, Log: types.Encode(re)}
 	logs = append(logs, receiptlog)
@@ -306,7 +281,7 @@ func freezeOrUnfreezeToken(from, tokenID uint64, amount string, option int32, st
 	return receipt, nil
 }
 
-func (a *Action) matchModel(leftTokenID, rightTokenID uint32, payload *zt.SpotTradeInfo, matchorder *zt.Order, or *zt.Order, re *zt.ReceiptExchange, feeAddr string, taker int32) ([]*types.ReceiptLog, []*types.KeyValue, error) {
+func (a *Action) matchModel(leftTokenID, rightTokenID uint32, payload *zt.SpotTradeInfo, matchorder *zt.Order, or *zt.Order, re *zt.ReceiptExchange, taker int32) ([]*types.ReceiptLog, []*types.KeyValue, error) {
 	var logs []*types.ReceiptLog
 	var kvs []*types.KeyValue
 	var matched int64
@@ -324,12 +299,18 @@ func (a *Action) matchModel(leftTokenID, rightTokenID uint32, payload *zt.SpotTr
 	var receipts *types.Receipt
 	var err error
 	var ops []*zt.ZkOperation
+	var methodName string
+	//eth-usdt交易对
+	//case1:如果出售方为发起方时：
+	//case1-op1:将usdt（rightTokenID）发送给发起方（出售方）
+	//          如果对手方就是自己，则直接激活即可
+	//case1-op2:将eth（leftTokenID）发送给订单方（购买方）
 	if payload.Op == zt.OpSell {
 		//Transfer of frozen assets
 		//如果发起交易是出售资产
 		//TODO:关于数量的处理，需要统一考虑 by Hezhenghun on 4.4 2023
 		amount := calcActualCost(matchorder.GetSpotTradeInfo().Op, matched, matchorder.GetSpotTradeInfo().Price, cfg.GetCoinPrecision())
-		methodName := ""
+		//
 		if matchorder.Addr != a.fromaddr {
 			//如果对手方和发起方为不同的地址，则将冻结的资产（即划入交易账户的资产）转账到出售方（即通过基础货币进行支付）支付Ｕ
 			transferPara := &zt.ZkTransfer{
@@ -338,121 +319,123 @@ func (a *Action) matchModel(leftTokenID, rightTokenID uint32, payload *zt.SpotTr
 				FromAccountId: matchorder.GetSpotTradeInfo().FromAccountID,
 				ToAccountId:   payload.FromAccountID,
 			}
-			receipts, err = a.l2TransferProc(transferPara, zt.TySpotTradeTakerTransfer, 18, zt.FromFrozen)
 			methodName = "l2TransferProc"
-			//receipt, err = rightAccountDB.ExecTransferFrozen(matchorder.Addr, a.fromaddr, a.execaddr, amount)
+			receipts, err = a.l2TransferProc(transferPara, zt.TySpotTradeTakerTransfer, 18, zt.FromFrozen)
+			if err != nil {
+				zlog.Error("matchModel", "methodName", methodName, "from", matchorder.Addr, "to", a.fromaddr, "amount", amount, "err", err)
+				return nil, nil, err
+			}
+
 		} else {
-			//receipt, err = rightAccountDB.ExecActive(a.fromaddr, a.execaddr, amount)
+			//如果匹配方是自己，则直接解冻相应的资产
 			receipts, err = freezeOrUnfreezeToken(payload.FromAccountID, uint64(rightTokenID|zt.SpotTradeTokenFlag), big.NewInt(amount).String(), zt.UnFreeze, a.statedb)
 			methodName = "freezeOrUnfreezeToken"
-		}
-		if err != nil {
-			zlog.Error("matchModel", "methodName", methodName, "from", matchorder.Addr, "to", a.fromaddr, "amount", amount, "err", err)
-			return nil, nil, err
-		}
-		ops = append(ops, &zt.ZkOperation{Ty: zt.TySpotTradeTakerTransfer, Op: &zt.OperationSpecialInfo{Value: &zt.OperationSpecialInfo_TransferToNew{TransferToNew: special}}})
-
-		//Charge fee
-		activeFee := calcMtfFee(amount, taker) //Transaction fee of the active party
-		if activeFee != 0 {
-
-			feeReceipt, feeQueue, err := a.MakeFeeLog(new(big.Int).SetInt64(activeFee).String(), uint64(rightTokenID|zt.SpotTradeTokenFlag))
 			if err != nil {
-				return nil, nil, errors.Wrapf(err, "MakeFeeLog")
+				zlog.Error("matchModel", "methodName", methodName, "from", matchorder.Addr, "to", a.fromaddr, "amount", amount, "err", err)
+				return nil, nil, err
 			}
-			or.DigestedFee += activeFee
 
-			ops = append(ops, feeQueue)
-			receipts = mergeReceipt(receipts, feeReceipt)
+			//Charge fee
+			activeFee := calcMtfFee(amount, taker) //Transaction fee of the active party
+			if activeFee != 0 {
+
+				feeReceipt, feeQueue, err := a.MakeFeeLog(new(big.Int).SetInt64(activeFee).String(), uint64(rightTokenID|zt.SpotTradeTokenFlag))
+				if err != nil {
+					return nil, nil, errors.Wrapf(err, "MakeFeeLog")
+				}
+				or.DigestedFee += activeFee
+
+				ops = append(ops, feeQueue)
+				receipts = mergeReceipt(receipts, feeReceipt)
+			}
 		}
+
+		ops = append(ops, &zt.ZkOperation{Ty: zt.TySpotTradeTakerTransfer, Op: &zt.OperationSpecialInfo{Value: &zt.OperationSpecialInfo_TransferToNew{TransferToNew: special}}})
 
 		//The settlement of the corresponding assets for the transaction to be concluded
 		amount = calcActualCost(payload.Op, matched, matchorder.GetSpotTradeInfo().Price, cfg.GetCoinPrecision())
 		if a.fromaddr != matchorder.Addr {
+			//支付标的资产给购买方
 			transferPara := &zt.ZkTransfer{
-				TokenId:       uint64(rightTokenID),
+				TokenId:       uint64(leftTokenID),
 				Amount:        big.NewInt(amount).String(),
-				FromAccountId: matchorder.GetSpotTradeInfo().FromAccountID,
-				ToAccountId:   payload.FromAccountID,
+				FromAccountId: payload.FromAccountID,
+				ToAccountId:   matchorder.GetSpotTradeInfo().FromAccountID,
 			}
-			receipts, err = a.l2TransferProc(transferPara, zt.TySpotTradeMakerTransfer, 18, zt.FromFrozen)
-
-			receipt, err = leftAccountDB.ExecTransfer(a.fromaddr, matchorder.Addr, a.execaddr, amount)
+			//包括maker支付交易费
+			receipts, err = a.l2TransferProc(transferPara, zt.TySpotTradeMakerTransfer, 18, zt.FromActive)
 			if err != nil {
-				zlog.Error("matchModel.ExecTransfer", "from", a.fromaddr, "to", matchorder.Addr, "amount", amount, "err", err.Error())
+				zlog.Error("matchModel.l2TransferProc", "transferPara", transferPara, "err", err.Error())
 				return nil, nil, err
 			}
-			logs = append(logs, receipt.Logs...)
-			kvs = append(kvs, receipt.KV...)
-		}
-
-		//Charge fee
-		passiveFee := calcMtfFee(amount, matchorder.GetRate()) //Passive transaction fees
-		if passiveFee != 0 {
-			receipt, err = leftAccountDB.ExecTransfer(matchorder.Addr, feeAddr, a.execaddr, passiveFee)
-			if err != nil {
-				zlog.Error("matchModel.ExecTransfer sell", "from", matchorder.Addr, "to", feeAddr,
-					"amount", amount, "rate", matchorder.GetRate(), "passiveFee", passiveFee, "err", err.Error())
-				return nil, nil, err
-			}
-			matchorder.DigestedFee += passiveFee
-			logs = append(logs, receipt.Logs...)
-			kvs = append(kvs, receipt.KV...)
 		}
 
 		or.AVGPrice = caclAVGPrice(or, matchorder.GetSpotTradeInfo().Price, matched)
 		//Calculate the average transaction price
 		matchorder.AVGPrice = caclAVGPrice(matchorder, matchorder.GetSpotTradeInfo().Price, matched)
-	}
-	if payload.Op == et.OpBuy {
+	} else {
+		//case2:如果购买方为发起方时：
+		//case2-op1:将eth（leftTokenID）发送给发起方（购买方）
+		//          如果对手方就是自己，则直接激活即可
+		//case2-op2:将usdt（rightTokenID）发送给订单方（出售方）
 		amount := calcActualCost(matchorder.GetSpotTradeInfo().Op, matched, matchorder.GetSpotTradeInfo().Price, cfg.GetCoinPrecision())
 		if a.fromaddr != matchorder.Addr {
-			receipt, err = leftAccountDB.ExecTransferFrozen(matchorder.Addr, a.fromaddr, a.execaddr, amount)
+			//将出售方的冻结标的资产转移至买方，如ETH-USDT交易对中的ETH资产
+			transferPara := &zt.ZkTransfer{
+				TokenId:       uint64(leftTokenID),
+				Amount:        big.NewInt(amount).String(),
+				FromAccountId: matchorder.GetSpotTradeInfo().FromAccountID,
+				ToAccountId:   payload.FromAccountID,
+			}
+			methodName = "l2TransferProc"
+			receipts, err = a.l2TransferProc(transferPara, zt.TySpotTradeTakerTransfer, 18, zt.FromFrozen)
+			if err != nil {
+				zlog.Error("matchModel", "methodName", methodName, "from", matchorder.Addr, "to", a.fromaddr, "amount", amount, "err", err)
+				return nil, nil, err
+			}
 		} else {
-			receipt, err = leftAccountDB.ExecActive(a.fromaddr, a.execaddr, amount)
+			//如果匹配方是自己，则直接解冻相应的资产
+			receipts, err = freezeOrUnfreezeToken(payload.FromAccountID, uint64(leftTokenID|zt.SpotTradeTokenFlag), big.NewInt(amount).String(), zt.UnFreeze, a.statedb)
+			methodName = "freezeOrUnfreezeToken"
+			if err != nil {
+				zlog.Error("matchModel", "methodName", methodName, "from", matchorder.Addr, "to", a.fromaddr, "amount", amount, "err", err)
+				return nil, nil, err
+			}
+
+			//Charge fee
+			activeFee := calcMtfFee(amount, taker) //Transaction fee of the active party
+			if activeFee != 0 {
+
+				feeReceipt, feeQueue, err := a.MakeFeeLog(new(big.Int).SetInt64(activeFee).String(), uint64(leftTokenID|zt.SpotTradeTokenFlag))
+				if err != nil {
+					return nil, nil, errors.Wrapf(err, "MakeFeeLog")
+				}
+				or.DigestedFee += activeFee
+
+				ops = append(ops, feeQueue)
+				receipts = mergeReceipt(receipts, feeReceipt)
+			}
 		}
 		if err != nil {
 			zlog.Error("matchModel.ExecTransferFrozen2", "from", matchorder.Addr, "to", a.fromaddr, "amount", amount, "err", err.Error())
 			return nil, nil, err
 		}
-		logs = append(logs, receipt.Logs...)
-		kvs = append(kvs, receipt.KV...)
-
-		activeFee := calcMtfFee(amount, taker)
-		if activeFee != 0 {
-			receipt, err = leftAccountDB.ExecTransfer(a.fromaddr, feeAddr, a.execaddr, activeFee)
-			if err != nil {
-				zlog.Error("matchModel.ExecTransfer buy", "from", a.fromaddr, "to", feeAddr,
-					"amount", amount, "rate", taker, "activeFee", activeFee, "err", err.Error())
-				return nil, nil, err
-			}
-			or.DigestedFee += activeFee
-			logs = append(logs, receipt.Logs...)
-			kvs = append(kvs, receipt.KV...)
-		}
 
 		amount = calcActualCost(payload.Op, matched, matchorder.GetSpotTradeInfo().Price, cfg.GetCoinPrecision())
 		if a.fromaddr != matchorder.Addr {
-			receipt, err = rightAccountDB.ExecTransfer(a.fromaddr, matchorder.Addr, a.execaddr, amount)
+			//购买方支付基础计价货币USDT
+			transferPara := &zt.ZkTransfer{
+				TokenId:       uint64(rightTokenID),
+				Amount:        big.NewInt(amount).String(),
+				FromAccountId: payload.FromAccountID,
+				ToAccountId:   matchorder.GetSpotTradeInfo().FromAccountID,
+			}
+			methodName = "l2TransferProc"
+			receipts, err = a.l2TransferProc(transferPara, zt.TySpotTradeMakerTransfer, 18, zt.FromActive)
 			if err != nil {
-				zlog.Error("matchModel.ExecTransfer2", "from", a.fromaddr, "to", matchorder.Addr, "amount", amount, "err", err.Error())
+				zlog.Error("matchModel", "methodName", methodName, "from", matchorder.Addr, "to", a.fromaddr, "amount", amount, "err", err)
 				return nil, nil, err
 			}
-			logs = append(logs, receipt.Logs...)
-			kvs = append(kvs, receipt.KV...)
-		}
-
-		passiveFee := calcMtfFee(amount, matchorder.GetRate())
-		if passiveFee != 0 {
-			receipt, err = rightAccountDB.ExecTransfer(matchorder.Addr, feeAddr, a.execaddr, passiveFee)
-			if err != nil {
-				zlog.Error("matchModel.ExecTransfer buy", "from", matchorder.Addr, "to", feeAddr,
-					"amount", amount, "rate", matchorder.GetRate(), "passiveFee", passiveFee, "err", err.Error())
-				return nil, nil, err
-			}
-			matchorder.DigestedFee += passiveFee
-			logs = append(logs, receipt.Logs...)
-			kvs = append(kvs, receipt.KV...)
 		}
 
 		or.AVGPrice = caclAVGPrice(or, matchorder.GetSpotTradeInfo().Price, matched)
@@ -476,18 +459,18 @@ func (a *Action) matchModel(leftTokenID, rightTokenID uint32, payload *zt.SpotTr
 	if matched == or.GetBalance() {
 		matchorder.Balance -= matched
 		matchorder.Executed = matched
-		kvs = append(kvs, a.GetKVSet(matchorder)...)
+		kvs = append(kvs, getKVSet(matchorder)...)
 
 		or.Executed += matched
 		or.Balance = 0
-		kvs = append(kvs, a.GetKVSet(or)...) //or complete
+		kvs = append(kvs, getKVSet(or)...) //or complete
 	} else {
 		or.Balance -= matched
 		or.Executed += matched
 
 		matchorder.Executed = matched
 		matchorder.Balance = 0
-		kvs = append(kvs, a.GetKVSet(matchorder)...) //matchorder complete
+		kvs = append(kvs, getKVSet(matchorder)...) //matchorder complete
 	}
 
 	re.Order = or
@@ -502,22 +485,27 @@ func (a *Action) matchModel(leftTokenID, rightTokenID uint32, payload *zt.SpotTr
 	return logs, kvs, nil
 }
 
+func getKVSet(order *zt.Order) (kvset []*types.KeyValue) {
+	kvset = append(kvset, &types.KeyValue{Key: calcOrderKey(order.OrderID), Value: types.Encode(order)})
+	return kvset
+}
+
 // Query the status database according to the order number
 // Localdb deletion sequence: delete the cache in real time first, and modify the DB uniformly during block generation.
 // The cache data will be deleted. However, if the cache query fails, the deleted data can still be queried in the DB
-func findOrderByOrderID(statedb dbm.KV, orderID int64) (*et.Order, error) {
+func findOrderByOrderID(statedb dbm.KV, orderID int64) (*zt.Order, error) {
 	data, err := statedb.Get(calcOrderKey(orderID))
 	if err != nil {
 		zlog.Error("findOrderByOrderID.Get", "orderID", orderID, "err", err.Error())
 		return nil, err
 	}
-	var order et.Order
+	var order zt.Order
 	err = types.Decode(data, &order)
 	if err != nil {
 		zlog.Error("findOrderByOrderID.Decode", "orderID", orderID, "err", err.Error())
 		return nil, err
 	}
-	order.Executed = order.GetLimitOrder().Amount - order.Balance
+	order.Executed = order.GetSpotTradeInfo().Amount - order.Balance
 	return &order, nil
 }
 
@@ -675,11 +663,11 @@ func safeMul(x, y, coinPrecision int64) int64 {
 }
 
 // Calculate the average transaction price
-func caclAVGPrice(order *et.Order, price int64, amount int64) int64 {
-	x := big.NewInt(0).Mul(big.NewInt(order.AVGPrice), big.NewInt(order.GetLimitOrder().Amount-order.GetBalance()))
+func caclAVGPrice(order *zt.Order, price int64, amount int64) int64 {
+	x := big.NewInt(0).Mul(big.NewInt(order.AVGPrice), big.NewInt(order.GetSpotTradeInfo().Amount-order.GetBalance()))
 	y := big.NewInt(0).Mul(big.NewInt(price), big.NewInt(amount))
 	total := big.NewInt(0).Add(x, y)
-	div := big.NewInt(0).Add(big.NewInt(order.GetLimitOrder().Amount-order.GetBalance()), big.NewInt(amount))
+	div := big.NewInt(0).Add(big.NewInt(order.GetSpotTradeInfo().Amount-order.GetBalance()), big.NewInt(amount))
 	avg := big.NewInt(0).Div(total, div)
 	return avg.Int64()
 }
