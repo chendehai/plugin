@@ -34,15 +34,15 @@ func Init(name string, cfg *types.Chain33Config, sub []byte) {
 
 // InitExecType Init Exec Type
 func InitExecType() {
-	ety := types.LoadExecutorType(driverName)
-	ety.InitFuncList(types.ListMethod(&zksync{}))
+	zty := types.LoadExecutorType(driverName)
+	zty.InitFuncList(types.ListMethod(&zksync{}))
 }
 
 type zksync struct {
 	drivers.DriverBase
 }
 
-//NewExchange ...
+// NewExchange ...
 func NewZksync() drivers.Driver {
 	t := &zksync{}
 	t.SetChild(t)
@@ -55,7 +55,7 @@ func GetName() string {
 	return NewZksync().GetName()
 }
 
-//GetDriverName ...
+// GetDriverName ...
 func (z *zksync) GetDriverName() string {
 	return driverName
 }
@@ -129,7 +129,7 @@ func (z *zksync) CheckTx(tx *types.Transaction, index int) error {
 	return nil
 }
 
-//ExecutorOrder Exec 的时候 同时执行 ExecLocal
+// ExecutorOrder Exec 的时候 同时执行 ExecLocal
 func (z *zksync) ExecutorOrder() int64 {
 	return drivers.ExecLocalSameTime
 }

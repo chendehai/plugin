@@ -64,7 +64,7 @@ func (a *Action) Deposit(payload *zt.ZkDeposit) (*types.Receipt, error) {
 	var kvs []*types.KeyValue
 	var err error
 
-	err = checkParam(payload.Amount)
+	err = checkAmount(payload.Amount)
 	if err != nil {
 		return nil, errors.Wrapf(err, "checkParam")
 	}
@@ -218,7 +218,7 @@ func saveKvs(db dbm.KV, kvs []*types.KeyValue) error {
 func (a *Action) ZkWithdraw(payload *zt.ZkWithdraw) (*types.Receipt, error) {
 	var logs []*types.ReceiptLog
 	var kvs []*types.KeyValue
-	err := checkParam(payload.Amount)
+	err := checkAmount(payload.Amount)
 	if err != nil {
 		return nil, errors.Wrapf(err, "checkParam")
 	}
@@ -249,7 +249,7 @@ func (a *Action) ZkWithdraw(payload *zt.ZkWithdraw) (*types.Receipt, error) {
 	if err != nil {
 		return nil, errors.Wrapf(err, "db.GetTokenByAccountIdAndTokenId")
 	}
-	err = checkAmount(token, amountPlusFee)
+	err = checkTokenBalance(token, amountPlusFee)
 	if err != nil {
 		return nil, errors.Wrapf(err, "db.checkAmount")
 	}
@@ -311,7 +311,7 @@ func (a *Action) ZkWithdraw(payload *zt.ZkWithdraw) (*types.Receipt, error) {
 	return mergeReceipt(receipts, r), nil
 }
 
-func checkAmount(token *zt.TokenBalance, amount string) error {
+func checkTokenBalance(token *zt.TokenBalance, amount string) error {
 	if token != nil {
 		balance, _ := new(big.Int).SetString(token.Balance, 10)
 		need, _ := new(big.Int).SetString(amount, 10)
@@ -333,7 +333,7 @@ func (a *Action) ContractToTree(payload *zt.ZkContractToTree) (*types.Receipt, e
 		return nil, errors.Wrapf(types.ErrInvalidParam, "coin precision is not defual=%d", types.DefaultCoinPrecision)
 	}
 
-	err := checkParam(payload.Amount)
+	err := checkAmount(payload.Amount)
 	if err != nil {
 		return nil, errors.Wrapf(err, "checkParam")
 	}
@@ -362,24 +362,13 @@ func (a *Action) contractToTreeAcctIdProc(payload *zt.ZkContractToTree, token *z
 	tokenIdBigint, _ := new(big.Int).SetString(token.Id, 10)
 	tokenId := tokenIdBigint.Uint64()
 
-	////根据精度，转化到tree侧的amount
-	//sysDecimal := strings.Count(strconv.Itoa(int(a.api.GetConfig().GetCoinPrecision())), "0")
-	//amountTree, err := TransferDecimalAmount(payload.Amount, sysDecimal, int(token.Decimal))
-	//if err != nil {
-	//	return nil, errors.Wrap(err, "getTreeSideAmount")
-	//}
-	//err = checkPackValue(amountTree, zt.PacAmountManBitWidth)
-	//if err != nil {
-	//	return nil, errors.Wrap(err, "checkPackValue")
-	//}
-
 	payload4transfer := &zt.ZkTransfer{
 		TokenId:       tokenId,
 		Amount:        payload.Amount,
 		FromAccountId: zt.SystemTree2ContractAcctId,
 		ToAccountId:   payload.ToAccountId,
 	}
-	receipts, err := a.l2TransferProc(payload4transfer, zt.TyContractToTreeAction, int(token.Decimal))
+	receipts, err := a.l2TransferProc(payload4transfer, zt.TyContractToTreeAction, int(token.Decimal), zt.FromActive)
 	if nil != err {
 		return nil, err
 	}
@@ -486,7 +475,7 @@ func (a *Action) contractToTreeNewProc(payload *zt.ZkContractToTree, token *zt.Z
 // 操作１. FromAccountId -----> SystemTree2ContractAcctId，执行ZkTransfer
 // 操作2. UpdateContractAccount，在合约内部的铸币操作
 func (a *Action) TreeToContract(payload *zt.ZkTreeToContract) (*types.Receipt, error) {
-	err := checkParam(payload.Amount)
+	err := checkAmount(payload.Amount)
 	if nil != err {
 		return nil, err
 	}
@@ -598,7 +587,7 @@ func (a *Action) transfer2Trade(para *transfer2TradePara) (*types.Receipt, error
 	var kvs []*types.KeyValue
 
 	amount := para.Amount
-	err := checkParam(amount)
+	err := checkAmount(amount)
 	if err != nil {
 		return nil, errors.Wrapf(err, "checkParam")
 	}
@@ -617,7 +606,7 @@ func (a *Action) transfer2Trade(para *transfer2TradePara) (*types.Receipt, error
 	if err != nil {
 		return nil, errors.Wrapf(err, "db.GetTokenByAccountIdAndTokenId")
 	}
-	err = checkAmount(fromToken, amount)
+	err = checkTokenBalance(fromToken, amount)
 	if err != nil {
 		return nil, errors.Wrapf(err, "db.checkAmount")
 	}
@@ -667,7 +656,7 @@ func (a *Action) l2TransferProc(payload *zt.ZkTransfer, actionTy int32, decimal 
 	var logs []*types.ReceiptLog
 	var kvs []*types.KeyValue
 
-	err := checkParam(payload.Amount)
+	err := checkAmount(payload.Amount)
 	if err != nil {
 		return nil, errors.Wrapf(err, "checkParam")
 	}
@@ -731,7 +720,7 @@ func (a *Action) l2TransferProc(payload *zt.ZkTransfer, actionTy int32, decimal 
 	if err != nil {
 		return nil, errors.Wrapf(err, "db.GetTokenByAccountIdAndTokenId")
 	}
-	err = checkAmount(fromToken, amountPlusFee)
+	err = checkTokenBalance(fromToken, amountPlusFee)
 	if err != nil {
 		return nil, errors.Wrapf(err, "db.checkAmount")
 	}
@@ -818,7 +807,7 @@ func (a *Action) ZkTransfer(payload *zt.ZkTransfer, actionTy int32) (*types.Rece
 	}
 
 	//此处的decimal无用
-	return a.l2TransferProc(payload, actionTy, 18)
+	return a.l2TransferProc(payload, actionTy, 18, zt.FromActive)
 }
 
 func (a *Action) transferToNewProcess(accountIdFrom uint64, toChain33Address, toEthAddress, totalAmount, amount string, tokenID uint64) (*types.Receipt, uint64, error) {
@@ -885,7 +874,7 @@ func (a *Action) transferToNewInnerProcess(fromLeaf *zt.Leaf, toChain33Address, 
 }
 
 func (a *Action) TransferToNew(payload *zt.ZkTransferToNew) (*types.Receipt, error) {
-	err := checkParam(payload.Amount)
+	err := checkAmount(payload.Amount)
 	if err != nil {
 		return nil, errors.Wrapf(err, "checkParam")
 	}
@@ -924,7 +913,7 @@ func (a *Action) TransferToNew(payload *zt.ZkTransferToNew) (*types.Receipt, err
 	if err != nil {
 		return nil, errors.Wrapf(err, "db.GetTokenByAccountIdAndTokenId")
 	}
-	err = checkAmount(fromToken, amountPlusFee)
+	err = checkTokenBalance(fromToken, amountPlusFee)
 	if err != nil {
 		return nil, errors.Wrapf(err, "db.checkAmount")
 	}
@@ -1256,7 +1245,7 @@ func authVerification(signPubKey *zt.ZkPubKey, leafPubKey *zt.ZkPubKey) error {
 }
 
 // 检查参数
-func checkParam(amount string) error {
+func checkAmount(amount string) error {
 	if amount == "" || strings.HasPrefix(amount, "-") {
 		return types.ErrAmount
 	}
@@ -1264,7 +1253,7 @@ func checkParam(amount string) error {
 	if !ok {
 		return errors.Wrapf(types.ErrInvalidParam, "decode amount=%s", amount)
 	}
-	if v.Cmp(big.NewInt(0)) == 0 {
+	if v.Cmp(big.NewInt(0)) <= 0 {
 		return errors.Wrapf(types.ErrInvalidParam, "amount=%s is 0", amount)
 	}
 	return nil
@@ -1629,7 +1618,7 @@ func (a *Action) MintNFT(payload *zt.ZkMintNFT) (*types.Receipt, error) {
 	if err != nil {
 		return nil, errors.Wrapf(err, "db.GetTokenByAccountIdAndTokenId")
 	}
-	err = checkAmount(feeToken, feeAmount)
+	err = checkTokenBalance(feeToken, feeAmount)
 	if err != nil {
 		return nil, errors.Wrapf(err, "db.checkAmount")
 	}
@@ -1867,7 +1856,7 @@ func (a *Action) withdrawNFT(payload *zt.ZkWithdrawNFT) (*types.Receipt, error) 
 	if err != nil {
 		return nil, errors.Wrapf(err, "db.GetTokenByAccountIdAndTokenId")
 	}
-	err = checkAmount(feeToken, feeAmount)
+	err = checkTokenBalance(feeToken, feeAmount)
 	if err != nil {
 		return nil, errors.Wrapf(err, "db.checkAmount")
 	}
@@ -2008,7 +1997,7 @@ func (a *Action) transferNFT(payload *zt.ZkTransferNFT) (*types.Receipt, error) 
 	if err != nil {
 		return nil, errors.Wrapf(err, "db.GetTokenByAccountIdAndTokenId")
 	}
-	err = checkAmount(feeToken, feeAmount)
+	err = checkTokenBalance(feeToken, feeAmount)
 	if err != nil {
 		return nil, errors.Wrapf(err, "db.checkAmount")
 	}
@@ -2344,7 +2333,7 @@ func checkSystemFeeAcctGap(sysFeeTokens, tokensGap map[uint64]string) ([]*zt.ZkA
 	var systemGapResp string
 	var systemGapData []*zt.ZkAcctRollbackInfo
 	var tokenIds []uint64 //记录顺序
-	for id, _ := range tokensGap {
+	for id := range tokensGap {
 		tokenIds = append(tokenIds, id)
 	}
 	sort.Slice(tokenIds, func(i, j int) bool { return tokenIds[i] < tokenIds[j] })

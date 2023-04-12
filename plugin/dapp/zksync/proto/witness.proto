@@ -273,24 +273,64 @@ message ZkSwapWitnessInfo {
   OpBlockInfo blockInfo = 9;
 }
 
+message ZkSpotTradeDealInfo {
+  uint64 accountID         = 1;
+  //该次挂单成交数量
+  string amount            = 2;
+  //0:taker 1:maker
+  int32 takerMaker         = 3;
+}
+
+message ZkSpotTradeWitnessInfo {
+  //左右资产ID
+  uint32    leftTokenID              = 1; //BTY-USDT 对
+  uint32    rightTokenID             = 2;
+  //交易购买信息
+  ZkSpotTradeDealInfo leftTokenFrom  = 3;
+  ZkSpotTradeDealInfo rightTokenFrom = 4;
+  string    price                    = 5;
+
+  //交易费率
+  string takerFeeRate                = 6;
+  string makerFeeRate                = 7;
+  OpBlockInfo blockInfo              = 8;
+}
+
+message ZkTransfer2ExWitnessInfo {
+  uint64 fromTokenID        = 1;
+  uint64 toTokenID          = 2;
+  string amount             = 3;
+  uint64 fromAccountId      = 4;
+}
+
+message ZkRevokeOrderInfo {
+    string orderID          = 1;
+    uint64 tokenID          = 2;
+    string amount           = 3;
+    string balance          = 4;
+}
+
 message OperationSpecialInfo {
   //  repeated OperationSpecialData specialDatas = 111;
   oneof value {
-    ZkDepositWitnessInfo  deposit            = 1;
-    ZkWithdrawWitnessInfo withdraw           = 2;
-    ZkTransferWitnessInfo transfer           = 3;
-    ZkTransferToNewWitnessInfo transferToNew = 4;
-    ZkProxyExitWitnessInfo proxyExit = 5;
-    ZkSetPubKeyWitnessInfo setPubKey         = 6;
-    ZkFullExitWitnessInfo  fullExit  = 7;
-    ZkSwapWitnessInfo  swap         = 8;
-    ZkContractToTreeWitnessInfo contractToTree = 9;
+    ZkDepositWitnessInfo  deposit                   = 1;
+    ZkWithdrawWitnessInfo withdraw                  = 2;
+    ZkTransferWitnessInfo transfer                  = 3;
+    ZkTransferToNewWitnessInfo transferToNew        = 4;
+    ZkProxyExitWitnessInfo proxyExit                = 5;
+    ZkSetPubKeyWitnessInfo setPubKey                = 6;
+    ZkFullExitWitnessInfo  fullExit                 = 7;
+    ZkSwapWitnessInfo  swap                         = 8;
+    ZkContractToTreeWitnessInfo contractToTree      = 9;
     ZkContractToTreeNewWitnessInfo contract2TreeNew = 10;
-    ZkTreeToContractWitnessInfo treeToContract = 11;
-    ZkFeeWitnessInfo fee        = 12;  //fee action
-    ZkMintNFTWitnessInfo     mintNFT       = 13;
-    ZkWithdrawNFTWitnessInfo withdrawNFT   = 14;
-    ZkTransferNFTWitnessInfo transferNFT   = 15;
+    ZkTreeToContractWitnessInfo treeToContract      = 11;
+    ZkFeeWitnessInfo fee                            = 12;  //fee action
+    ZkMintNFTWitnessInfo     mintNFT                = 13;
+    ZkWithdrawNFTWitnessInfo withdrawNFT            = 14;
+    ZkTransferNFTWitnessInfo transferNFT            = 15;
+    ZkSpotTradeWitnessInfo spotTrade                = 16;
+    ZkTransfer2ExWitnessInfo tranfer2trade          = 17;
+    ZkRevokeOrderInfo revokeOrder                   = 18;
   }
 }
 

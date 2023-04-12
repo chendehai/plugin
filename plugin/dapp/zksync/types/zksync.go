@@ -38,10 +38,10 @@ const (
 	//纯特殊电路类型，非Zksync合约使用的action
 	TyContractToTreeNewAction = 30 //合约账户转入新的叶子
 
-	TySpotTradeTakerTransfer = 40 //taker 转账
-	TySpotTradeMakerTransfer = 41 //maker 转账
-	TyTransfer2Trade         = 42 //将资产转入交易账户
-	TyTransferFromTrade      = 43 //将资产从交易账户转出到资金账户
+	TyTransfer2Trade    = 40 //将资产转入交易账户
+	TyTransferFromTrade = 41 //将资产从交易账户转出到资金账户
+	TySpotTrade         = 42 //现货交易类型
+	TyRevokeSpotTrade   = 43
 
 	//非电路action
 	TySetVerifyKeyAction   = 102 //设置电路验证key
@@ -103,6 +103,9 @@ const (
 	TyWithdrawNFTLog    = 113 //L2提款NFT到L1
 	TyTransferNFTLog    = 114 //L2提款NFT到L1
 	TyMintNFT2SystemLog = 115 //向系统账户铸造NFT,且其token ID为全局nft token id，因为其余额设置为token hash,所以使用不同的log标志
+	TySpotTradeOrderLog = 116 //现货交易
+	TyTransfer2TradeLog = 117 //转账到交易所
+	TyRevokeOrderLog    = 118 //取消现货交易订单
 
 	TySetVerifyKeyLog          = 202 //设置电路验证key
 	TyCommitProofLog           = 203 //提交zk proof
@@ -135,6 +138,9 @@ const (
 
 	MaxDecimalAllow = 18
 	MinDecimalAllow = 4
+
+	TySpotTradeTakerTransfer = 0 //taker 转账
+	TySpotTradeMakerTransfer = 1 //maker 转账
 )
 
 // Zksync 执行器名称定义

@@ -2,10 +2,6 @@ package executor
 
 import (
 	"fmt"
-	ety "github.com/33cn/plugin/plugin/dapp/exchange/types"
-
-	"github.com/33cn/chain33/common/address"
-
 	"github.com/33cn/chain33/common/db"
 	"github.com/33cn/chain33/common/db/table"
 	"github.com/33cn/chain33/types"
@@ -17,13 +13,6 @@ import (
  * 即key = keyPrefix + userKey
  * 需要字段前缀查询时，使用’-‘作为分割符号
  */
-
-const (
-	//KeyPrefixStateDB state db key必须前缀
-	KeyPrefixStateDB = "mavl-exchange-"
-	//KeyPrefixLocalDB local db的key必须前缀
-	KeyPrefixLocalDB = "LODB-exchange"
-)
 
 // 状态数据库中存储具体挂单信息
 func calcOrderKey(orderID int64) []byte {
@@ -95,7 +84,7 @@ func NewOrderRow() *OrderRow {
 
 // CreateRow ...
 func (r *OrderRow) CreateRow() *table.Row {
-	return &table.Row{Data: &ety.Order{}}
+	return &table.Row{Data: &zty.Order{}}
 }
 
 // SetPayload 设置数据
@@ -112,31 +101,31 @@ func (r *OrderRow) Get(key string) ([]byte, error) {
 	if key == "orderID" {
 		return []byte(fmt.Sprintf("%022d", r.OrderID)), nil
 	} else if key == "market_order" {
-		return []byte(fmt.Sprintf("%d:%d:%d:%016d", r.GetSpotTradeInfo().LeftAssetTokenID, r.GetSpotTradeInfo().RightAssetTokenID, r.GetSpotTradeInfo().Op, r.GetSpotTradeInfo().Price)), nil
+		return []byte(fmt.Sprintf("%d:%d:%d:%s", r.GetSpotTradeInfo().LeftAssetTokenID, r.GetSpotTradeInfo().RightAssetTokenID, r.GetSpotTradeInfo().Op, r.GetSpotTradeInfo().Price)), nil
 	} else if key == "addr_status" {
-		return []byte(fmt.Sprintf("%s:%d", address.FormatAddrKey(r.Addr), r.Status)), nil
+		return []byte(fmt.Sprintf("%d:%d", r.AccountID, r.Status)), nil
 	}
 	return nil, types.ErrNotFound
 }
 
 // HistoryOrderRow table meta 结构
 type HistoryOrderRow struct {
-	*ety.Order
+	*zty.Order
 }
 
 // NewHistoryOrderRow ...
 func NewHistoryOrderRow() *HistoryOrderRow {
-	return &HistoryOrderRow{Order: &ety.Order{Value: &ety.Order_LimitOrder{LimitOrder: &ety.LimitOrder{}}}}
+	return &HistoryOrderRow{Order: &zty.Order{Value: &zty.Order_SpotTradeInfo{SpotTradeInfo: &zty.SpotTradeInfo{}}}}
 }
 
 // CreateRow ...
 func (m *HistoryOrderRow) CreateRow() *table.Row {
-	return &table.Row{Data: &ety.Order{Value: &ety.Order_LimitOrder{LimitOrder: &ety.LimitOrder{}}}}
+	return &table.Row{Data: &zty.Order{Value: &zty.Order_SpotTradeInfo{SpotTradeInfo: &zty.SpotTradeInfo{}}}}
 }
 
 // SetPayload 设置数据
 func (m *HistoryOrderRow) SetPayload(data types.Message) error {
-	if txdata, ok := data.(*ety.Order); ok {
+	if txdata, ok := data.(*zty.Order); ok {
 		m.Order = txdata
 		return nil
 	}
@@ -148,9 +137,9 @@ func (m *HistoryOrderRow) Get(key string) ([]byte, error) {
 	if key == "index" {
 		return []byte(fmt.Sprintf("%022d", m.Index)), nil
 	} else if key == "name" {
-		return []byte(fmt.Sprintf("%s:%s", m.GetLimitOrder().LeftAsset.GetSymbol(), m.GetLimitOrder().RightAsset.GetSymbol())), nil
+		return []byte(fmt.Sprintf("%d:%d", m.GetSpotTradeInfo().LeftAssetTokenID, m.GetSpotTradeInfo().RightAssetTokenID)), nil
 	} else if key == "addr_status" {
-		return []byte(fmt.Sprintf("%s:%d", address.FormatAddrKey(m.Addr), m.Status)), nil
+		return []byte(fmt.Sprintf("%d:%d", m.AccountID, m.Status)), nil
 	}
 	return nil, types.ErrNotFound
 }
@@ -167,7 +156,7 @@ func NewMarketDepthRow() *MarketDepthRow {
 
 // CreateRow 新建数据行(注意index 数据一定也要保存到数据中,不能就保存eventid)
 func (m *MarketDepthRow) CreateRow() *table.Row {
-	return &table.Row{Data: &ety.MarketDepth{}}
+	return &table.Row{Data: &zty.MarketDepth{}}
 }
 
 // SetPayload 设置数据
@@ -182,7 +171,7 @@ func (m *MarketDepthRow) SetPayload(data types.Message) error {
 // Get 按照indexName 查询 indexValue
 func (m *MarketDepthRow) Get(key string) ([]byte, error) {
 	if key == "price" {
-		return []byte(fmt.Sprintf("%d:%d:%d:%016d", m.LeftAssetTokenID, m.RightAssetTokenID, m.Op, m.Price)), nil
+		return []byte(fmt.Sprintf("%d:%d:%d:%s", m.LeftAssetTokenID, m.RightAssetTokenID, m.Op, m.Price)), nil
 	}
 	return nil, types.ErrNotFound
 }

@@ -33,6 +33,7 @@ func (z *zksync) Exec_ZkTransfer(payload *zt.ZkTransfer, tx *types.Transaction, 
 	return action.ZkTransfer(payload, zt.TyTransferAction)
 }
 
+// 现货交易挂单，如果只是挂单则不产生交易费，如果挂单即吃单，则收取交易费
 func (z *zksync) Exec_ZkSpotTrade(payload *zt.ZkSpotTrade, tx *types.Transaction, index int) (*types.Receipt, error) {
 	action := NewAction(z, tx, index)
 	//系统设置exodus mode后，则不处理此类交易
@@ -42,6 +43,7 @@ func (z *zksync) Exec_ZkSpotTrade(payload *zt.ZkSpotTrade, tx *types.Transaction
 	return action.ZkSpotTrade(payload)
 }
 
+// 取消现货交易
 func (z *zksync) Exec_ZkRevokeTrade(payload *zt.ZkRevokeTrade, tx *types.Transaction, index int) (*types.Receipt, error) {
 	action := NewAction(z, tx, index)
 	//系统设置exodus mode后，则不处理此类交易
@@ -51,6 +53,7 @@ func (z *zksync) Exec_ZkRevokeTrade(payload *zt.ZkRevokeTrade, tx *types.Transac
 	return action.ZkRevokeTrade(payload)
 }
 
+// 资金划转，不收取l2的交易费
 func (z *zksync) Exec_ZkTransfer2Ex(payload *zt.ZkTransfer2Ex, tx *types.Transaction, index int) (*types.Receipt, error) {
 	action := NewAction(z, tx, index)
 	//系统设置exodus mode后，则不处理此类交易

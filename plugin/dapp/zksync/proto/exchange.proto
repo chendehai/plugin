@@ -10,9 +10,9 @@ message SpotTradeInfo {
   //交易对
   uint32 rightAssetTokenID = 2;
   //价格
-  int64 price              = 3;
+  string price             = 3;
   //总量
-  int64 amount             = 4;
+  string amount            = 4;
   //操作， 1为买，2为卖
   int32 op                 = 5;
   //L2交易发起账户ID
@@ -28,15 +28,15 @@ message Order {
   //挂单类型
   int32 ty = 4;
   //已经成交的数量
-  int64 executed = 5;
+  string executed = 5;
   //成交均价
-  int64 AVG_price = 6;
+  string AVG_price = 6;
   //余额
-  int64 balance = 7;
+  string balance = 7;
   //状态,0 挂单中ordered， 1 完成completed， 2撤回 revoked
   int32 status = 8;
-  //用户地址
-  string addr = 9;
+  //用户ID
+  uint64 accountID = 9;
   //更新时间
   int64 updateTime = 10;
   //索引
@@ -73,15 +73,15 @@ message QueryMarketDepth {
 //市场深度
 message MarketDepth {
   //资产1
-  uint32 leftAssetTokenID = 1;
+  uint32 leftAssetTokenID  = 1;
   //资产2
   uint32 rightAssetTokenID = 2;
   //价格
-  int64 price = 3;
+  string price             = 3;
   //总量
-  int64 amount = 4;
+  string amount            = 4;
   //操作， 1为买，2为卖
-  int32 op = 5;
+  int32 op                 = 5;
 }
 //查询接口返回的市场深度列表
 message MarketDepthList {
