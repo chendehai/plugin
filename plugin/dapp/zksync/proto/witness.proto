@@ -288,11 +288,11 @@ message ZkSpotTradeWitnessInfo {
   //交易购买信息
   ZkSpotTradeDealInfo leftTokenFrom  = 3;
   ZkSpotTradeDealInfo rightTokenFrom = 4;
-  string    price                    = 5;
+  int64    price                     = 5;
 
   //交易费率
-  string takerFeeRate                = 6;
-  string makerFeeRate                = 7;
+  int64 takerFeeRate                 = 6;
+  int64 makerFeeRate                 = 7;
   OpBlockInfo blockInfo              = 8;
 }
 

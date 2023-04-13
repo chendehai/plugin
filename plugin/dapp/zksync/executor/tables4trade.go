@@ -101,7 +101,7 @@ func (r *OrderRow) Get(key string) ([]byte, error) {
 	if key == "orderID" {
 		return []byte(fmt.Sprintf("%022d", r.OrderID)), nil
 	} else if key == "market_order" {
-		return []byte(fmt.Sprintf("%d:%d:%d:%s", r.GetSpotTradeInfo().LeftAssetTokenID, r.GetSpotTradeInfo().RightAssetTokenID, r.GetSpotTradeInfo().Op, r.GetSpotTradeInfo().Price)), nil
+		return []byte(fmt.Sprintf("%d:%d:%d:%016d", r.GetSpotTradeInfo().LeftAssetTokenID, r.GetSpotTradeInfo().RightAssetTokenID, r.GetSpotTradeInfo().Op, r.GetSpotTradeInfo().Price)), nil
 	} else if key == "addr_status" {
 		return []byte(fmt.Sprintf("%d:%d", r.AccountID, r.Status)), nil
 	}
@@ -171,7 +171,7 @@ func (m *MarketDepthRow) SetPayload(data types.Message) error {
 // Get 按照indexName 查询 indexValue
 func (m *MarketDepthRow) Get(key string) ([]byte, error) {
 	if key == "price" {
-		return []byte(fmt.Sprintf("%d:%d:%d:%s", m.LeftAssetTokenID, m.RightAssetTokenID, m.Op, m.Price)), nil
+		return []byte(fmt.Sprintf("%d:%d:%d:%016d", m.LeftAssetTokenID, m.RightAssetTokenID, m.Op, m.Price)), nil
 	}
 	return nil, types.ErrNotFound
 }

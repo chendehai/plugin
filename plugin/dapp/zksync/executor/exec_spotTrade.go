@@ -37,11 +37,10 @@ func (a *Action) ZkSpotTrade(payload *zt.ZkSpotTrade) (*types.Receipt, error) {
 	if leftTokenID == rightTokenID {
 		return nil, errors.Wrapf(types.ErrNotAllow, "asset with the same token ID =%d", leftTokenID)
 	}
-	if !checkTradeAmount(tradeInfo.GetAmount()) {
+	if !checkTradeAmount(tradeInfo.GetAmount(), a.api.GetConfig().GetCoinPrecision()) {
 		return nil, zt.ErrAssetAmount
 	}
-	price, _ := new(big.Int).SetString(tradeInfo.GetPrice(), 10)
-	if !checkPrice(price.Int64()) {
+	if !checkPrice(tradeInfo.GetPrice()) {
 		return nil, zt.ErrAssetPrice
 	}
 	if !checkOp(tradeInfo.GetOp()) {
@@ -133,8 +132,8 @@ func (a *Action) matchLimitOrder(tradeInfo *zt.SpotTradeInfo) (*types.Receipt, e
 		OrderID:    a.GetIndex(),
 		Value:      &zt.Order_SpotTradeInfo{tradeInfo},
 		Ty:         et.TyLimitOrderAction,
-		Executed:   "0",
-		AVGPrice:   "0",
+		Executed:   0,
+		AVGPrice:   0,
 		Balance:    tradeInfo.GetAmount(),
 		Status:     et.Ordered,
 		AccountID:  tradeInfo.FromAccountID,
@@ -150,7 +149,6 @@ func (a *Action) matchLimitOrder(tradeInfo *zt.SpotTradeInfo) (*types.Receipt, e
 		Index: a.GetIndex(),
 	}
 
-	var ops []*zt.ZkOperation
 	// A single transaction can match up to 100 historical orders, the maximum depth can be matched, the system has to protect itself
 	// Iteration has listing price
 	var done bool
@@ -223,7 +221,7 @@ func (a *Action) matchLimitOrder(tradeInfo *zt.SpotTradeInfo) (*types.Receipt, e
 							TxIndex: int32(a.index),
 						},
 					}
-					log, kv, err := a.matchModel(leftTokenID, rightTokenID, tradeInfo, order, or, re, taker, special) // payload, or redundant
+					log, kv, err := a.matchModel(leftTokenInfo, rightTokenInfo, tradeInfo, order, or, re, taker, special) // payload, or redundant
 					if err != nil {
 						if err == types.ErrNoBalance {
 							zlog.Warn("matchModel RevokeOrder", "height", a.height, "orderID", order.GetOrderID(), "payloadID", or.GetOrderID(), "error", err)
@@ -234,17 +232,10 @@ func (a *Action) matchLimitOrder(tradeInfo *zt.SpotTradeInfo) (*types.Receipt, e
 					logs = append(logs, log...)
 					kvs = append(kvs, kv...)
 
-					ops = append(ops, &zt.ZkOperation{Ty: zt.TySpotTrade, Op: &zt.OperationSpecialInfo{Value: &zt.OperationSpecialInfo_SpotTrade{SpotTrade: special}}})
 					if or.Status == et.Completed {
 						receiptlog := &types.ReceiptLog{Ty: et.TyLimitOrderLog, Log: types.Encode(re)}
 						logs = append(logs, receiptlog)
 						receipts := &types.Receipt{Ty: types.ExecOk, KV: kvs, Logs: logs}
-
-						r4op, _, err := setL2QueueData(a.statedb, ops)
-						if nil != err {
-							return nil, err
-						}
-						receipts = mergeReceipt(receipts, r4op)
 						return receipts, nil
 					}
 					// match depth count
@@ -259,8 +250,8 @@ func (a *Action) matchLimitOrder(tradeInfo *zt.SpotTradeInfo) (*types.Receipt, e
 				var matchorder zt.Order
 				matchorder.UpdateTime = a.blocktime
 				matchorder.Status = et.Completed
-				matchorder.Balance = "0"
-				matchorder.Executed = "0"
+				matchorder.Balance = 0
+				matchorder.Executed = 0
 				matchorder.AVGPrice = marketDepth.Price
 				zlog.Info("make empty match to del depth", "height", a.height, "price", marketDepth.Price, "amount", marketDepth.Amount)
 				re.MatchOrders = append(re.MatchOrders, &matchorder)
@@ -310,12 +301,6 @@ func (a *Action) matchLimitOrder(tradeInfo *zt.SpotTradeInfo) (*types.Receipt, e
 	logs = append(logs, receiptlog)
 	receipts := &types.Receipt{Ty: types.ExecOk, KV: kvs, Logs: logs}
 
-	r4op, _, err := setL2QueueData(a.statedb, ops)
-	if nil != err {
-		return nil, err
-	}
-	receipts = mergeReceipt(receipts, r4op)
-
 	return receipts, nil
 }
 
@@ -349,15 +334,12 @@ func (a *Action) matchModel(
 
 	var logs []*types.ReceiptLog
 	var kvs []*types.KeyValue
-	var matched string
+	var matched int64
 
 	leftTokenID, _ := strconv.Atoi(leftTokenInfo.Id)
 	rightTokenID, _ := strconv.Atoi(rightTokenInfo.Id)
 
-	matchedBalance, _ := new(big.Int).SetString(matchorder.GetBalance(), 10)
-	orderBalance, _ := new(big.Int).SetString(or.GetBalance(), 10)
-
-	if matchedBalance.Cmp(orderBalance) > 0 {
+	if matchorder.GetBalance() > or.GetBalance() {
 		matched = or.GetBalance()
 	} else {
 		matched = matchorder.GetBalance()
@@ -396,7 +378,7 @@ func (a *Action) matchModel(
 				FromAccountId: matchorder.AccountID,
 				ToAccountId:   payload.FromAccountID,
 			}
-			receipts, err = a.l2TransferProc(transferPara, zt.TySpotTradeTakerTransfer, 18, zt.FromFrozen)
+			receipts, err = a.l2TransferProc(transferPara, zt.TySpotTrade, 18, zt.FromFrozen)
 			if err != nil {
 				zlog.Error("matchModel", "methodName", "l2TransferProc", "from", matchorder.AccountID, "to", a.fromaddr, "amount", amountInStr, "err", err)
 				return nil, nil, err
@@ -425,8 +407,6 @@ func (a *Action) matchModel(
 			}
 		}
 
-		ops = append(ops, &zt.ZkOperation{Ty: zt.TySpotTradeTakerTransfer, Op: &zt.OperationSpecialInfo{Value: &zt.OperationSpecialInfo_TransferToNew{TransferToNew: special}}})
-
 		//The settlement of the corresponding assets for the transaction to be concluded
 		amountInStr, err = calcActualCost(payload.Op, matched, matchorder.GetSpotTradeInfo().Price, coinPrecisionDecimal, int(leftTokenInfo.Decimal))
 		if nil != err {
@@ -444,7 +424,7 @@ func (a *Action) matchModel(
 				ToAccountId:   matchorder.GetSpotTradeInfo().FromAccountID,
 			}
 			//包括maker支付交易费
-			receipts, err = a.l2TransferProc(transferPara, zt.TySpotTradeMakerTransfer, 18, zt.FromActive)
+			receipts, err = a.l2TransferProc(transferPara, zt.TySpotTrade, 18, zt.FromActive)
 			if err != nil {
 				zlog.Error("matchModel.l2TransferProc", "transferPara", transferPara, "err", err.Error())
 				return nil, nil, err
@@ -475,7 +455,7 @@ func (a *Action) matchModel(
 				FromAccountId: matchorder.GetSpotTradeInfo().FromAccountID,
 				ToAccountId:   payload.FromAccountID,
 			}
-			receipts, err = a.l2TransferProc(transferPara, zt.TySpotTradeTakerTransfer, 18, zt.FromFrozen)
+			receipts, err = a.l2TransferProc(transferPara, zt.TySpotTrade, 18, zt.FromFrozen)
 			if err != nil {
 				zlog.Error("matchModel.l2TransferProc", "from", matchorder.AccountID, "to", a.fromaddr, "amount", amountInStr, "err", err)
 				return nil, nil, err
@@ -522,7 +502,7 @@ func (a *Action) matchModel(
 				FromAccountId: payload.FromAccountID,
 				ToAccountId:   matchorder.GetSpotTradeInfo().FromAccountID,
 			}
-			receipts, err = a.l2TransferProc(transferPara, zt.TySpotTradeMakerTransfer, 18, zt.FromActive)
+			receipts, err = a.l2TransferProc(transferPara, zt.TySpotTrade, 18, zt.FromActive)
 			if err != nil {
 				zlog.Error("matchModel.l2TransferProc", "from", matchorder.AccountID, "to", a.fromaddr, "amount", amountInStr, "err", err)
 				return nil, nil, err
@@ -532,6 +512,7 @@ func (a *Action) matchModel(
 		or.AVGPrice = caclAVGPrice(or, matchorder.GetSpotTradeInfo().Price, matched)
 		matchorder.AVGPrice = caclAVGPrice(matchorder, matchorder.GetSpotTradeInfo().Price, matched)
 	}
+	ops = append(ops, &zt.ZkOperation{Ty: zt.TySpotTrade, Op: &zt.OperationSpecialInfo{Value: &zt.OperationSpecialInfo_SpotTrade{SpotTrade: special}}})
 
 	matchorder.UpdateTime = a.blocktime
 
@@ -548,12 +529,16 @@ func (a *Action) matchModel(
 	}
 
 	if matched == or.GetBalance() {
+
 		matchorder.Balance -= matched
 		matchorder.Executed = matched
+
+		matchorder.Executed = matched
+
 		kvs = append(kvs, getKVSet(matchorder)...)
 
 		or.Executed += matched
-		or.Balance = "0"
+		or.Balance = 0
 		kvs = append(kvs, getKVSet(or)...) //or complete
 	} else {
 		or.Balance -= matched
@@ -600,9 +585,9 @@ func findOrderByOrderID(statedb dbm.KV, orderID int64) (*zt.Order, error) {
 	return &order, nil
 }
 
-func findOrderIDListByPrice(localdb dbm.KV, leftTokenID, rightTokenID uint32, price string, op, direction int32, primaryKey string) (*et.OrderList, error) {
+func findOrderIDListByPrice(localdb dbm.KV, leftTokenID, rightTokenID uint32, price int64, op, direction int32, primaryKey string) (*et.OrderList, error) {
 	table := NewMarketOrderTable(localdb)
-	prefix := []byte(fmt.Sprintf("%d:%d:%d:%s", leftTokenID, rightTokenID, op, price))
+	prefix := []byte(fmt.Sprintf("%d:%d:%d:%016d", leftTokenID, rightTokenID, op, price))
 
 	var rows []*tab.Row
 	var err error
@@ -722,46 +707,29 @@ func parseConfig(cfg *types.Chain33Config, height int64) (*et.Econfig, error) {
 //	return amount
 //}
 
-func calcActualCost(op int32, amount, price string, coinDecimal int, tokenDecimal int) (string, error) {
+func calcActualCost(op int32, amount, price int64, coinDecimal int, tokenDecimal int) (string, error) {
+	amountBig := big.NewInt(amount)
 	if op == et.OpBuy {
 		// amount:0.1eth = 1e7
 		// price:2000.xxu/eth = 2.000xxe11/eth
 		// res: 1e7 * 2.000xxe11 = 2.000xxe18 u
 		// res: 2.000xxe18 u / 1e16 = 200.xx u
 		//根据u的deciml进行扩展200.xx u　200.xx 1edecimal
-		amountBig, ok := big.NewInt(0).SetString(amount, 10)
-		if !ok {
-			return "", errors.Wrapf(types.ErrInvalidParam, "calcActualCost amount=%s", amount)
-		}
-
-		priceBig, _ := big.NewInt(0).SetString(price, 10)
-		if !ok {
-			return "", errors.Wrapf(types.ErrInvalidParam, "calcActualCost price=%s", price)
-		}
+		priceBig := big.NewInt(price)
 		res := big.NewInt(0).Mul(amountBig, priceBig)
 
 		// 8*2 ---> 8
 		return TransferDecimalAmount(res.String(), coinDecimal*2, tokenDecimal)
 	}
 
-	return TransferDecimalAmount(amount, coinDecimal, tokenDecimal)
+	return TransferDecimalAmount(amountBig.String(), coinDecimal, tokenDecimal)
 }
 
 // checkTradeAmount 最小交易 1coin
-func checkTradeAmount(amount string) bool {
-	if nil != checkAmount(amount) {
+func checkTradeAmount(amount, coinPrecision int64) bool {
+	if amount < 1 || amount >= types.MaxCoin*coinPrecision {
 		return false
 	}
-
-	amoutBig, ok := new(big.Int).SetString(amount, 10)
-	if !ok {
-		return false
-	}
-
-	if amoutBig.Cmp(big.NewInt(1)) < 0 {
-		return false
-	}
-
 	return true
 }
 
@@ -790,13 +758,24 @@ func safeMul(x, y, coinPrecision int64) int64 {
 }
 
 // Calculate the average transaction price
-func caclAVGPrice(order *zt.Order, price int64, amount int64) int64 {
-	x := big.NewInt(0).Mul(big.NewInt(order.AVGPrice), big.NewInt(order.GetSpotTradeInfo().Amount-order.GetBalance()))
-	y := big.NewInt(0).Mul(big.NewInt(price), big.NewInt(amount))
-	total := big.NewInt(0).Add(x, y)
-	div := big.NewInt(0).Add(big.NewInt(order.GetSpotTradeInfo().Amount-order.GetBalance()), big.NewInt(amount))
-	avg := big.NewInt(0).Div(total, div)
-	return avg.Int64()
+func caclAVGPrice(order *zt.Order, price, amount int64) int64 {
+	amountBig := big.NewInt(amount)
+	priceBig := big.NewInt(price)
+	avgPrice := big.NewInt(order.AVGPrice)
+	//订单总量
+	total := big.NewInt(order.GetSpotTradeInfo().Amount)
+	//订单未成交余额
+	balace := big.NewInt(order.GetBalance())
+	//已经成交量
+	dealAmount := total.Sub(total, balace)
+
+	//根据平均价和已经成交量　计算成交总价
+	deal := avgPrice.Mul(avgPrice, dealAmount)
+	current := amountBig.Mul(priceBig, amountBig)
+
+	deal = deal.Add(deal, current)
+	div := amountBig.Add(amountBig, dealAmount)
+	return deal.Div(deal, div).Int64()
 }
 
 // 计Calculation fee

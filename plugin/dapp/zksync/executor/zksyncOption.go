@@ -713,7 +713,7 @@ func (a *Action) l2TransferProc(payload *zt.ZkTransfer, actionTy int32, decimal 
 		return nil, errors.New("account not exist")
 	}
 	fromTokenID := payload.GetTokenId()
-	if actionTy == zt.TyTransferFromTrade || actionTy == zt.TySpotTradeTakerTransfer || actionTy == zt.TySpotTradeMakerTransfer {
+	if actionTy == zt.TyTransferFromTrade || actionTy == zt.TySpotTrade {
 		fromTokenID = fromTokenID | zt.SpotTradeTokenFlag
 	}
 	fromToken, err := GetTokenByAccountIdAndTokenId(a.statedb, payload.FromAccountId, fromTokenID)
@@ -742,7 +742,7 @@ func (a *Action) l2TransferProc(payload *zt.ZkTransfer, actionTy int32, decimal 
 	}
 
 	toTokenID := payload.GetTokenId()
-	if actionTy == zt.TyTransfer2Trade || actionTy == zt.TySpotTradeTakerTransfer || actionTy == zt.TySpotTradeMakerTransfer {
+	if actionTy == zt.TyTransfer2Trade || actionTy == zt.TySpotTrade {
 		toTokenID = toTokenID | zt.SpotTradeTokenFlag
 	}
 	toKVs, _, receiptTo, err := applyL2AccountUpdate(toLeaf.GetAccountId(), toTokenID, payload.GetAmount(), zt.Add, a.statedb, toLeaf, false, zt.FromActive)
@@ -782,7 +782,9 @@ func (a *Action) l2TransferProc(payload *zt.ZkTransfer, actionTy int32, decimal 
 
 	//add  transfer & fee queue
 	var ops []*zt.ZkOperation
-	ops = append(ops, operation)
+	if actionTy != zt.TySpotTrade {
+		ops = append(ops, operation)
+	}
 	ops = append(ops, feeQueue)
 	r, _, err := setL2QueueData(a.statedb, ops)
 	if err != nil {
