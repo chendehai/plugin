@@ -87,25 +87,26 @@ const (
 
 // log类型id值
 const (
-	TyNoopLog           = 100
-	TyDepositLog        = 101 //存款
-	TyWithdrawLog       = 102 //取款
-	TyTransferLog       = 103 //转账
-	TyTransferToNewLog  = 104 //向新地址转账
-	TyProxyExitLog      = 105 //强制退出
-	TySetPubKeyLog      = 106 //设置公钥
-	TyFullExitLog       = 107 //从L1完全退出
-	TySwapLog           = 108 //交换
-	TyContractToTreeLog = 109 //合约账户转入叶子
-	TyTreeToContractLog = 110 //叶子账户转入合约
-	TyFeeLog            = 111 //手续费
-	TyMintNFTLog        = 112 //铸造NFT
-	TyWithdrawNFTLog    = 113 //L2提款NFT到L1
-	TyTransferNFTLog    = 114 //L2提款NFT到L1
-	TyMintNFT2SystemLog = 115 //向系统账户铸造NFT,且其token ID为全局nft token id，因为其余额设置为token hash,所以使用不同的log标志
-	TySpotTradeOrderLog = 116 //现货交易
-	TyTransfer2TradeLog = 117 //转账到交易所
-	TyRevokeOrderLog    = 118 //取消现货交易订单
+	TyNoopLog            = 100
+	TyDepositLog         = 101 //存款
+	TyWithdrawLog        = 102 //取款
+	TyTransferLog        = 103 //转账
+	TyTransferToNewLog   = 104 //向新地址转账
+	TyProxyExitLog       = 105 //强制退出
+	TySetPubKeyLog       = 106 //设置公钥
+	TyFullExitLog        = 107 //从L1完全退出
+	TySwapLog            = 108 //交换
+	TyContractToTreeLog  = 109 //合约账户转入叶子
+	TyTreeToContractLog  = 110 //叶子账户转入合约
+	TyFeeLog             = 111 //手续费
+	TyMintNFTLog         = 112 //铸造NFT
+	TyWithdrawNFTLog     = 113 //L2提款NFT到L1
+	TyTransferNFTLog     = 114 //L2提款NFT到L1
+	TyMintNFT2SystemLog  = 115 //向系统账户铸造NFT,且其token ID为全局nft token id，因为其余额设置为token hash,所以使用不同的log标志
+	TySpotTradeOrderLog  = 116 //现货交易
+	TyTransfer2TradeLog  = 117 //转账到交易所
+	TyRevokeOrderLog     = 118 //取消现货交易订单
+	TySetSpotTradeFeeLog = 119 //设置现货交易费
 
 	TySetVerifyKeyLog          = 202 //设置电路验证key
 	TyCommitProofLog           = 203 //提交zk proof
@@ -314,6 +315,7 @@ var (
 		TyDepositRollbackLog:       {Ty: reflect.TypeOf(AccountTokenBalanceReceipt{}), Name: "TyDepositRollbackLog"},
 		TyWithdrawRollbackLog:      {Ty: reflect.TypeOf(AccountTokenBalanceReceipt{}), Name: "TyWithdrawRollbackLog"},
 		TyPriority2QueIdLog:        {Ty: reflect.TypeOf(Priority2QueueId{}), Name: "TyPriority2QueueIdLog"},
+		TySetSpotTradeFeeLog:       {Ty: reflect.TypeOf(ReceiptSpotTradeFee{}), Name: "TySetSpotTradeFeeLog"},
 	}
 
 	FeeMap = map[int64]string{

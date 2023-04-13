@@ -33,6 +33,11 @@ func (z *zksync) Exec_ZkTransfer(payload *zt.ZkTransfer, tx *types.Transaction, 
 	return action.ZkTransfer(payload, zt.TyTransferAction)
 }
 
+func (z *zksync) Exec_ZkSetSpotFee(payload *zt.ZkSetSpotFee, tx *types.Transaction, index int) (*types.Receipt, error) {
+	action := NewAction(z, tx, index)
+	return action.ZkSetSpotFee(payload)
+}
+
 // 现货交易挂单，如果只是挂单则不产生交易费，如果挂单即吃单，则收取交易费
 func (z *zksync) Exec_ZkSpotTrade(payload *zt.ZkSpotTrade, tx *types.Transaction, index int) (*types.Receipt, error) {
 	action := NewAction(z, tx, index)

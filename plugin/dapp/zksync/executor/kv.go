@@ -60,12 +60,12 @@ func getLastOnChainProofIdKey() []byte {
 	return []byte(fmt.Sprintf("%s", KeyPrefixStateDB+"-lastOnChainProofId"))
 }
 
-//last eth priority id key
+// last eth priority id key
 func getEthPriorityQueueKey() []byte {
 	return []byte(fmt.Sprintf("%s", KeyPrefixStateDB+"priorityQueue"))
 }
 
-//特意把title放后面，方便按id=1搜索所有的chain
+// 特意把title放后面，方便按id=1搜索所有的chain
 func getProofIdCommitProofKey(proofId uint64) []byte {
 	return []byte(fmt.Sprintf("%016d", proofId))
 }
@@ -90,12 +90,12 @@ func getExodusModeKey() []byte {
 	return []byte(fmt.Sprintf("%s", KeyPrefixStateDB+"exodusMode"))
 }
 
-//GetTokenSymbolKey tokenId 对应symbol
+// GetTokenSymbolKey tokenId 对应symbol
 func GetTokenSymbolKey(tokenId string) []byte {
 	return []byte(fmt.Sprintf("%s", KeyPrefixStateDB+"tokenId-"+tokenId))
 }
 
-//GetTokenSymbolIdKey token symbol 对应id
+// GetTokenSymbolIdKey token symbol 对应id
 func GetTokenSymbolIdKey(symbol string) []byte {
 	return []byte(fmt.Sprintf("%s", KeyPrefixStateDB+"tokenSym-"+symbol))
 }
@@ -112,27 +112,31 @@ func getProofIdKey(id uint64) []byte {
 	return []byte(fmt.Sprintf("%s%022d", KeyPrefixStateDB+"-ProofId", id))
 }
 
-//the first L2 op that not be verified by proof
+// the first L2 op that not be verified by proof
 func getL2FirstQueueIdKey() []byte {
 	return []byte(fmt.Sprintf("%s", KeyPrefixStateDB+"-L2FirstQueId"))
 }
 
-//the last op that queued to L2, 从0开始
+// the last op that queued to L2, 从0开始
 func getL2LastQueueIdKey() []byte {
 	return []byte(fmt.Sprintf("%s", KeyPrefixStateDB+"-L2LastQueId"))
 }
 
-//the specific L2 op queue id data key
+// the specific L2 op queue id data key
 func getL2QueueIdKey(id int64) []byte {
 	return []byte(fmt.Sprintf("%s%022d", KeyPrefixStateDB+"-L2QueueId", id))
 }
 
-//the proof id to the end first queue id key, the end first queue id == last pubdata's operation
+// the proof id to the end first queue id key, the end first queue id == last pubdata's operation
 func getProofId2QueueIdKey(proofID uint64) []byte {
 	return []byte(fmt.Sprintf("%s%022d", KeyPrefixStateDB+"-proof2queueId", proofID))
 }
 
-//the proof id to the end first queue id key, the end first queue id == last pubdata's operation
+// the proof id to the end first queue id key, the end first queue id == last pubdata's operation
 func getL1PriorityId2QueueIdKey(priorityId int64) []byte {
 	return []byte(fmt.Sprintf("%s%022d", KeyPrefixStateDB+"-priority2QueId", priorityId))
+}
+
+func getSpotTradePairFeeKeyPrefix(left, right string) []byte {
+	return []byte(fmt.Sprintf("%s%s-%s", KeyPrefixStateDB, left, right))
 }

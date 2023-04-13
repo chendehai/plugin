@@ -42,11 +42,9 @@ message Order {
   //索引
   int64 index = 11;
   //手续费率 (挂单)
-  int32 rate = 12;
+  int64 rate = 12;
   //手续费
   int64 digestedFee = 13;
-  //最小手续费
-  int64 minFee = 14;
   //挂单hash
   string hash = 15;
   //撤单hash

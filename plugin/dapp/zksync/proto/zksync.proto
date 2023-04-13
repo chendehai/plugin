@@ -29,6 +29,7 @@ message ZksyncAction {
     ZkRevokeTrade revokeTrade        = 21;
     //将资产在l2账户和现货账户，永续合约账户之间进行划转
     ZkTransfer2Ex transfer2Ex        = 22;
+    ZkSetSpotFee setSpotFee          = 23;
 
     ZkVerifyKey         setVerifyKey = 31;
     ZkCommitProof       commitProof  = 32;
@@ -344,12 +345,31 @@ message ReceiptSetVerifier {
   ZkVerifier current = 2;
 }
 
-
-
 message ZkSetFee {
   uint64 tokenId = 1;
   string amount = 2;
   int32 actionTy = 3;
+}
+
+message ZkAsset {
+    uint64 tokenId  = 1;
+    string symbol   = 2;
+}
+
+message ZkSetSpotFee {
+  ZkAsset leftToken  = 1;
+  ZkAsset rightToken = 2;
+  int64 takerRate    = 3;
+  int64 makerRate    = 4;
+}
+
+message ReceiptSpotTradeFee {
+  string leftToken           = 1;
+  string rightToken          = 2;
+  int64 takerRatePrevious    = 3;
+  int64 makerRatePrevious    = 4;
+  int64 takerRateAfter       = 5;
+  int64 makerRateAfter       = 6;
 }
 
 message ReceiptSetFee {

@@ -15,7 +15,72 @@ import (
 )
 
 var coinPrecisionDecimal = 8
+var coinPrecision = types.DefaultCoinPrecision
 var initCoinPrecision = false
+var tradePair2FeeMap map[string]*zt.ZkSetSpotFee
+var freeFeeMap map[string]bool
+
+func init() {
+	tradePair2FeeMap = make(map[string]*zt.ZkSetSpotFee)
+	freeFeeMap = make(map[string]bool)
+}
+
+func (a *Action) ZkSetSpotFee(payload *zt.ZkSetSpotFee) (*types.Receipt, error) {
+	//只有管理员才能设置交易费
+	cfg := a.api.GetConfig()
+	if !isSuperManager(cfg, a.fromaddr) && !isVerifier(a.statedb, a.fromaddr) {
+		return nil, errors.Wrapf(types.ErrNotAllow, "from addr is not manager")
+	}
+
+	leftTokenInfo, err := GetTokenByTokenId(a.statedb, strconv.Itoa(int(payload.LeftToken.TokenId)))
+	if nil != err {
+		zlog.Error("executor.ZkSetSpotFee.GetTokenByTokenId", "leftTokenID", payload.LeftToken.TokenId, "err", err)
+		return nil, err
+	}
+	if leftTokenInfo.Symbol != payload.LeftToken.Symbol {
+		zlog.Error("executor.ZkSetSpotFee", "ErrWrongTokenSymbol:%s != %s", leftTokenInfo.Symbol, payload.LeftToken.Symbol)
+		return nil, errors.Wrapf(errors.New("ErrWrongTokenSymbol"), "%s != %s", leftTokenInfo.Symbol, payload.LeftToken.Symbol)
+	}
+
+	rightTokenInfo, err := GetTokenByTokenId(a.statedb, strconv.Itoa(int(payload.RightToken.TokenId)))
+	if nil != err {
+		zlog.Error("executor matchLimitOrder.GetTokenByTokenId", "rightTokenID", payload.RightToken.TokenId, "err", err)
+		return nil, err
+	}
+	if rightTokenInfo.Symbol != payload.RightToken.Symbol {
+		zlog.Error("executor.ZkSetSpotFee", "ErrWrongTokenSymbol:%s != %s", rightTokenInfo.Symbol, payload.RightToken.Symbol)
+		return nil, errors.Wrapf(errors.New("ErrWrongTokenSymbol"), "%s != %s", rightTokenInfo.Symbol, payload.RightToken.Symbol)
+	}
+
+	key := getSpotTradePairFeeKeyPrefix(leftTokenInfo.Symbol, rightTokenInfo.Symbol)
+	data := types.Encode(payload)
+
+	kv := &types.KeyValue{
+		Key:   key,
+		Value: data,
+	}
+
+	old, _ := getSpotTradeFeeFromDB(a.statedb, leftTokenInfo.Symbol, rightTokenInfo.Symbol)
+
+	setFeelog := &zt.ReceiptSpotTradeFee{
+		LeftToken:         leftTokenInfo.Symbol,
+		RightToken:        rightTokenInfo.Symbol,
+		TakerRatePrevious: old.TakerRate,
+		MakerRatePrevious: old.MakerRate,
+		TakerRateAfter:    payload.TakerRate,
+		MakerRateAfter:    payload.MakerRate,
+	}
+
+	receiptLog := &types.ReceiptLog{Ty: zt.TySetSpotTradeFeeLog, Log: types.Encode(setFeelog)}
+	receipts := &types.Receipt{
+		Ty:   types.ExecOk,
+		KV:   []*types.KeyValue{kv},
+		Logs: []*types.ReceiptLog{receiptLog}}
+
+	//在此处更新交易费列表
+	tradePair2FeeMap[string(key)] = payload
+	return receipts, nil
+}
 
 func (a *Action) ZkSpotTrade(payload *zt.ZkSpotTrade) (*types.Receipt, error) {
 	tradeInfo := payload.SpotTradeInfo
@@ -83,9 +148,8 @@ func (a *Action) matchLimitOrder(tradeInfo *zt.SpotTradeInfo) (*types.Receipt, e
 		kvs          []*types.KeyValue
 		priceKey     string
 		count        int
-		taker        int32
-		maker        int32
-		minFee       int64
+		taker        int64
+		maker        int64
 		leftTokenID  uint32
 		rightTokenID uint32
 	)
@@ -107,25 +171,22 @@ func (a *Action) matchLimitOrder(tradeInfo *zt.SpotTradeInfo) (*types.Receipt, e
 	cfg := a.api.GetConfig()
 	if !initCoinPrecision {
 		//初始化
+		coinPrecision = cfg.GetCoinPrecision()
 		coinPrecisionDecimal = int(math.Log(float64(cfg.GetCoinPrecision())))
 		initCoinPrecision = true
 	}
 
-	tCfg, err := parseConfig(a.api.GetConfig(), a.height)
-	if err != nil {
-		zlog.Error("executor/exchangedb matchLimitOrder.ParseConfig", "err", err)
-		return nil, err
-	}
-
-	if cfg.IsDappFork(a.height, et.Exchan, et.ForkFix1) && tCfg.IsBankAddr(a.fromaddr) {
-		return nil, et.ErrAddrIsBank
-	}
-
-	if !tCfg.IsFeeFreeAddr(a.fromaddr) {
-		trade := tCfg.GetTrade(tradeInfo.GetLeftAsset(), tradeInfo.GetRightAsset())
-		taker = trade.GetTaker()
-		maker = trade.GetMaker()
-		minFee = trade.GetMinFee()
+	//如果不是免收交易费，则设置相应的交易费
+	if !freeFeeMap[a.fromaddr] {
+		keyStr := string(getSpotTradePairFeeKeyPrefix(leftTokenInfo.Symbol, rightTokenInfo.Symbol))
+		tradePair2Fee, ok := tradePair2FeeMap[keyStr]
+		if !ok {
+			current, _ := getSpotTradeFeeFromDB(a.statedb, leftTokenInfo.Symbol, rightTokenInfo.Symbol)
+			tradePair2FeeMap[keyStr] = current
+			tradePair2Fee = current
+		}
+		taker = tradePair2Fee.TakerRate
+		maker = tradePair2Fee.MakerRate
 	}
 
 	or := &zt.Order{
@@ -140,7 +201,6 @@ func (a *Action) matchLimitOrder(tradeInfo *zt.SpotTradeInfo) (*types.Receipt, e
 		UpdateTime: a.blocktime,
 		Index:      a.GetIndex(),
 		Rate:       maker,
-		MinFee:     minFee,
 		Hash:       hex.EncodeToString(a.txhash),
 		CreateTime: a.blocktime,
 	}
@@ -328,7 +388,7 @@ func (a *Action) matchModel(
 	matchorder *zt.Order,
 	or *zt.Order,
 	re *zt.ReceiptExchange,
-	taker int32,
+	taker int64,
 	special *zt.ZkSpotTradeWitnessInfo,
 ) ([]*types.ReceiptLog, []*types.KeyValue, error) {
 
@@ -393,10 +453,9 @@ func (a *Action) matchModel(
 			}
 
 			//Charge fee
-			activeFee := calcMtfFee(amount, taker) //Transaction fee of the active party
-			if activeFee != 0 {
-
-				feeReceipt, feeQueue, err := a.MakeFeeLog(new(big.Int).SetInt64(activeFee).String(), uint64(rightTokenID|zt.SpotTradeTokenFlag))
+			activeFeeInstr, activeFee, err := calcMtfFee(amountInStr, taker, coinPrecision, coinPrecisionDecimal, int(rightTokenInfo.Decimal)) //Transaction fee of the active party
+			if err == nil {
+				feeReceipt, feeQueue, err := a.MakeFeeLog(activeFeeInstr, uint64(rightTokenID|zt.SpotTradeTokenFlag))
 				if err != nil {
 					return nil, nil, errors.Wrapf(err, "MakeFeeLog")
 				}
@@ -469,10 +528,9 @@ func (a *Action) matchModel(
 			}
 
 			//Charge fee
-			activeFee := calcMtfFee(amount, taker) //Transaction fee of the active party
-			if activeFee != 0 {
-
-				feeReceipt, feeQueue, err := a.MakeFeeLog(new(big.Int).SetInt64(activeFee).String(), uint64(leftTokenID|zt.SpotTradeTokenFlag))
+			activeFeeInstr, activeFee, err := calcMtfFee(amountInStr, taker, coinPrecision, coinPrecisionDecimal, int(leftTokenInfo.Decimal))
+			if err == nil {
+				feeReceipt, feeQueue, err := a.MakeFeeLog(activeFeeInstr, uint64(leftTokenID|zt.SpotTradeTokenFlag))
 				if err != nil {
 					return nil, nil, errors.Wrapf(err, "MakeFeeLog")
 				}
@@ -668,45 +726,6 @@ func ParseStrings(cfg *types.Chain33Config, tradeKey string, height int64) (ret 
 	return
 }
 
-func parseConfig(cfg *types.Chain33Config, height int64) (*et.Econfig, error) {
-	banks, err := ParseStrings(cfg, "banks", height)
-	if err != nil || len(banks) == 0 {
-		return nil, err
-	}
-
-	robots, err := ParseStrings(cfg, "robots", height)
-	if err != nil || len(banks) == 0 {
-		return nil, err
-	}
-	robotMap := make(map[string]bool)
-	for _, v := range robots {
-		robotMap[v] = true
-	}
-
-	coins, err := ParseCoins(cfg, "coins", height)
-	if err != nil {
-		return nil, err
-	}
-	exchanges, err := ParseSymbols(cfg, "exchanges", height)
-	if err != nil {
-		return nil, err
-	}
-	return &et.Econfig{
-		Banks:     banks,
-		RobotMap:  robotMap,
-		Coins:     coins,
-		Exchanges: exchanges,
-	}, nil
-}
-
-// calcActualCost Calculate actual cost
-//func calcActualCost(op int32, amount int64, price, coinPrecision int64) int64 {
-//	if op == et.OpBuy {
-//		return safeMul(amount, price, coinPrecision)
-//	}
-//	return amount
-//}
-
 func calcActualCost(op int32, amount, price int64, coinDecimal int, tokenDecimal int) (string, error) {
 	amountBig := big.NewInt(amount)
 	if op == et.OpBuy {
@@ -779,10 +798,12 @@ func caclAVGPrice(order *zt.Order, price, amount int64) int64 {
 }
 
 // 计Calculation fee
-func calcMtfFee(cost int64, rate int32) int64 {
-	fee := big.NewInt(0).Mul(big.NewInt(cost), big.NewInt(int64(rate)))
-	fee = big.NewInt(0).Div(fee, big.NewInt(types.DefaultCoinPrecision))
-	return fee.Int64()
+func calcMtfFee(cost string, rate, coinPrecision int64, decimalFrom, decimalTo int) (string, int64, error) {
+	amount, _ := new(big.Int).SetString(cost, 10)
+	fee := big.NewInt(0).Mul(amount, big.NewInt(rate))
+	fee = big.NewInt(0).Div(fee, big.NewInt(coinPrecision))
+	feeStr, err := TransferDecimalAmount(fee.String(), decimalFrom, decimalTo)
+	return feeStr, fee.Int64(), err
 }
 
 func opSwap(op int32) int32 {
@@ -790,4 +811,20 @@ func opSwap(op int32) int32 {
 		return et.OpSell
 	}
 	return et.OpBuy
+}
+
+// 如果交易费未设置,则直接返回空值
+func getSpotTradeFeeFromDB(db dbm.KV, left, right string) (*zt.ZkSetSpotFee, error) {
+	var fee zt.ZkSetSpotFee
+	key := getSpotTradePairFeeKeyPrefix(left, right)
+	v, err := db.Get(key)
+	if err != nil {
+		return &fee, err
+	}
+	err = types.Decode(v, &fee)
+	if nil != err {
+		return &fee, err
+	}
+
+	return &fee, nil
 }
