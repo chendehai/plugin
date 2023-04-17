@@ -382,6 +382,238 @@ func freezeOrUnfreezeToken(from, tokenID uint64, amount string, option int32, st
 	return receipt, nil
 }
 
+// eth-usdt交易对
+// case1:如果出售方为发起方时：
+// case1-op1:将usdt（rightTokenID）发送给发起方（出售方）, 如果对手方就是自己，则直接激活即可
+// case1-op2:将出售方账户中一定的usdt（rightTokenID）发送给系统交易费账户，用于支付交易费
+// case1-op3:将eth（leftTokenID）发送给订单方（购买方）
+// case1-op4:将购买方账户中一定的eth（leftTokenID）发送给系统交易费账户，用于支付交易费
+// 先操作支付taker交易费的资产类型，即右资产(usdt)
+func (a *Action) sellerIsTaker(
+	leftTokenInfo, rightTokenInfo *zt.ZkTokenSymbol,
+	payload *zt.SpotTradeInfo,
+	matchorder *zt.Order,
+	matched int64,
+	or *zt.Order,
+	taker int64,
+	special *zt.ZkSpotTradeWitnessInfo,
+) (*types.Receipt, error) {
+	var receipts *types.Receipt
+	leftTokenID, _ := strconv.Atoi(leftTokenInfo.Id)
+	rightTokenID, _ := strconv.Atoi(rightTokenInfo.Id)
+
+	amountInStr, err := calcActualCost(matchorder.GetSpotTradeInfo().Op, matched, matchorder.GetSpotTradeInfo().Price, coinPrecisionDecimal, int(rightTokenInfo.Decimal))
+	if err != nil {
+		zlog.Error("matchModel", "methodName", "calcActualCost", "from", matchorder.AccountID, "to", a.fromaddr, "amount", amountInStr, "err", err)
+		return nil, err
+	}
+
+	special.Price = matchorder.GetSpotTradeInfo().Price
+	special.RightTokenFrom.AccountID = matchorder.AccountID
+	special.RightTokenFrom.Amount = amountInStr
+	special.RightTokenFrom.TakerMaker = zt.TySpotTradeTakerTransfer
+	//case1-op1:将usdt（rightTokenID）发送给发起方（出售方）
+	if matchorder.AccountID != payload.FromAccountID {
+		//如果对手方和发起方为不同的地址，则将冻结的资产（即划入交易账户的资产）转账到出售方（即通过基础货币进行支付）支付Ｕ
+		transferPara := &zt.ZkTransfer{
+			TokenId:       uint64(rightTokenID),
+			Amount:        amountInStr,
+			FromAccountId: matchorder.AccountID,
+			ToAccountId:   payload.FromAccountID,
+		}
+		receipt, err := a.l2Transfer4SpotTrade(transferPara, zt.FromFrozen)
+		if err != nil {
+			zlog.Error("matchModel", "methodName", "l2TransferProc", "from", matchorder.AccountID, "to", a.fromaddr, "amount", amountInStr, "err", err)
+			return nil, err
+		}
+		receipts = mergeReceipt(receipts, receipt)
+
+	} else {
+		//如果匹配方是自己，则直接解冻相应的资产U
+		receipt, err := freezeOrUnfreezeToken(payload.FromAccountID, uint64(rightTokenID|zt.SpotTradeTokenFlag), amountInStr, zt.UnFreeze, a.statedb)
+		if err != nil {
+			zlog.Error("matchModel", "methodName", "freezeOrUnfreezeToken", "from", matchorder.AccountID, "to", a.fromaddr, "amount", amountInStr, "err", err)
+			return nil, err
+		}
+		receipts = mergeReceipt(receipts, receipt)
+	}
+	//Charge fee, pay usdt as fee
+	activeFeeInstr, activeFee, err := calcMtfFee(amountInStr, taker, coinPrecision, coinPrecisionDecimal, int(rightTokenInfo.Decimal)) //Transaction fee of the active party
+	if err == nil {
+		//如果对手方和发起方为不同的地址，则将冻结的资产（即划入交易账户的资产）转账到出售方（即通过基础货币进行支付）支付Ｕ
+		transferPara := &zt.ZkTransfer{
+			TokenId:       uint64(rightTokenID),
+			Amount:        activeFeeInstr,
+			FromAccountId: payload.FromAccountID,
+			ToAccountId:   zt.SystemFeeAccountId,
+		}
+		feeReceipt, err := a.l2Transfer4SpotTrade(transferPara, zt.FromActive)
+		if err != nil {
+			zlog.Error("matchModel", "methodName", "l2TransferProc", "from", matchorder.AccountID, "to", a.fromaddr, "amount", amountInStr, "err", err)
+			return nil, err
+		}
+		or.DigestedFee += activeFee
+		receipts = mergeReceipt(receipts, feeReceipt)
+	}
+
+	//The settlement of the corresponding assets for the transaction to be concluded
+	amountInStr, err = calcActualCost(payload.Op, matched, matchorder.GetSpotTradeInfo().Price, coinPrecisionDecimal, int(leftTokenInfo.Decimal))
+	if nil != err {
+		return nil, err
+	}
+	special.LeftTokenFrom.AccountID = payload.FromAccountID
+	special.LeftTokenFrom.Amount = amountInStr
+	special.LeftTokenFrom.TakerMaker = zt.TySpotTradeMakerTransfer
+	if payload.FromAccountID != matchorder.AccountID {
+		//支付标的资产给购买方
+		transferPara := &zt.ZkTransfer{
+			TokenId:       uint64(leftTokenID),
+			Amount:        amountInStr,
+			FromAccountId: payload.FromAccountID,
+			ToAccountId:   matchorder.GetSpotTradeInfo().FromAccountID,
+		}
+		//包括maker支付交易费
+		receipts, err = a.l2Transfer4SpotTrade(transferPara, zt.FromActive)
+		if err != nil {
+			zlog.Error("matchModel.l2TransferProc", "transferPara", transferPara, "err", err.Error())
+			return nil, err
+		}
+	}
+	activeFeeInstr, activeFee, err = calcMtfFee(amountInStr, matchorder.Rate, coinPrecision, coinPrecisionDecimal, int(leftTokenInfo.Decimal)) //Transaction fee of the active party
+	if err == nil {
+		//如果对手方和发起方为不同的地址，则将冻结的资产（即划入交易账户的资产）转账到出售方（即通过基础货币进行支付）支付Ｕ
+		transferPara := &zt.ZkTransfer{
+			TokenId:       uint64(leftTokenID),
+			Amount:        activeFeeInstr,
+			FromAccountId: matchorder.GetSpotTradeInfo().FromAccountID,
+			ToAccountId:   zt.SystemFeeAccountId,
+		}
+		feeReceipt, err := a.l2Transfer4SpotTrade(transferPara, zt.FromActive)
+		if err != nil {
+			zlog.Error("matchModel", "methodName", "l2TransferProc", "from", matchorder.AccountID, "to", a.fromaddr, "amount", amountInStr, "err", err)
+			return nil, err
+		}
+		matchorder.DigestedFee += activeFee
+		receipts = mergeReceipt(receipts, feeReceipt)
+	}
+
+	or.AVGPrice = calcAVGPrice(or, matchorder.GetSpotTradeInfo().Price, matched)
+	//Calculate the average transaction price
+	matchorder.AVGPrice = calcAVGPrice(matchorder, matchorder.GetSpotTradeInfo().Price, matched)
+
+	return receipts, nil
+}
+
+// case2:如果购买方为发起方时：
+// case2-op1:将eth（leftTokenID）发送给发起方（购买方，　如果对手方就是自己，则直接激活即可
+// case2-op2:将购买方收到的eth支付一定数量给系统收费账户（出售方）
+// case2-op3:将eth（leftTokenID）发送给发起方（购买方）
+// case2-op4:将usdt（rightTokenID）发送给订单方（出售方）
+func (a *Action) buyerIsTaker(
+	leftTokenInfo, rightTokenInfo *zt.ZkTokenSymbol,
+	payload *zt.SpotTradeInfo,
+	matchorder *zt.Order,
+	matched int64,
+	or *zt.Order,
+	taker int64,
+	special *zt.ZkSpotTradeWitnessInfo,
+) (*types.Receipt, error) {
+	var receipts *types.Receipt
+	leftTokenID, _ := strconv.Atoi(leftTokenInfo.Id)
+	rightTokenID, _ := strconv.Atoi(rightTokenInfo.Id)
+
+	amountInStr, err := calcActualCost(matchorder.GetSpotTradeInfo().Op, matched, matchorder.GetSpotTradeInfo().Price, coinPrecisionDecimal, int(leftTokenInfo.Decimal))
+	if nil != err {
+		return nil, err
+	}
+	special.Price = matchorder.GetSpotTradeInfo().Price
+	special.LeftTokenFrom.AccountID = matchorder.AccountID
+	special.LeftTokenFrom.Amount = amountInStr
+	special.LeftTokenFrom.TakerMaker = zt.TySpotTradeMakerTransfer
+	if payload.FromAccountID != matchorder.AccountID {
+		//将出售方的冻结标的资产转移至买方，如ETH-USDT交易对中的ETH资产
+		transferPara := &zt.ZkTransfer{
+			TokenId:       uint64(leftTokenID),
+			Amount:        amountInStr,
+			FromAccountId: matchorder.GetSpotTradeInfo().FromAccountID,
+			ToAccountId:   payload.FromAccountID,
+		}
+		receipts, err = a.l2Transfer4SpotTrade(transferPara, zt.FromFrozen)
+		if err != nil {
+			zlog.Error("matchModel.l2TransferProc", "from", matchorder.AccountID, "to", a.fromaddr, "amount", amountInStr, "err", err)
+			return nil, err
+		}
+	} else {
+		//如果匹配方是自己，则直接解冻相应的资产
+		receipts, err = freezeOrUnfreezeToken(payload.FromAccountID, uint64(leftTokenID|zt.SpotTradeTokenFlag), amountInStr, zt.UnFreeze, a.statedb)
+		if err != nil {
+			zlog.Error("matchModel.freezeOrUnfreezeToken", "from", matchorder.AccountID, "to", a.fromaddr, "amount", amountInStr, "err", err)
+			return nil, err
+		}
+	}
+	//Charge fee
+	activeFeeInstr, activeFee, err := calcMtfFee(amountInStr, taker, coinPrecision, coinPrecisionDecimal, int(leftTokenInfo.Decimal))
+	if err == nil {
+		transferPara := &zt.ZkTransfer{
+			TokenId:       uint64(leftTokenID),
+			Amount:        activeFeeInstr,
+			FromAccountId: payload.FromAccountID,
+			ToAccountId:   zt.SystemFeeAccountId,
+		}
+		feeReceipt, err := a.l2Transfer4SpotTrade(transferPara, zt.FromActive)
+		if err != nil {
+			zlog.Error("matchModel.l2TransferProc", "from", matchorder.AccountID, "to", a.fromaddr, "amount", amountInStr, "err", err)
+			return nil, err
+		}
+		or.DigestedFee += activeFee
+		receipts = mergeReceipt(receipts, feeReceipt)
+	}
+
+	amountInStr, err = calcActualCost(payload.Op, matched, matchorder.GetSpotTradeInfo().Price, coinPrecisionDecimal, int(rightTokenInfo.Decimal))
+	if nil != err {
+		return nil, err
+	}
+	special.RightTokenFrom.AccountID = payload.FromAccountID
+	special.RightTokenFrom.Amount = amountInStr
+	special.RightTokenFrom.TakerMaker = zt.TySpotTradeTakerTransfer
+	if payload.FromAccountID != matchorder.AccountID {
+		//购买方支付基础计价货币USDT
+		transferPara := &zt.ZkTransfer{
+			TokenId:       uint64(rightTokenID),
+			Amount:        amountInStr,
+			FromAccountId: payload.FromAccountID,
+			ToAccountId:   matchorder.GetSpotTradeInfo().FromAccountID,
+		}
+		receipts, err = a.l2Transfer4SpotTrade(transferPara, zt.FromActive)
+		if err != nil {
+			zlog.Error("matchModel.l2TransferProc", "from", matchorder.AccountID, "to", a.fromaddr, "amount", amountInStr, "err", err)
+			return nil, err
+		}
+	}
+
+	activeFeeInstr, activeFee, err = calcMtfFee(amountInStr, matchorder.Rate, coinPrecision, coinPrecisionDecimal, int(rightTokenInfo.Decimal))
+	if err == nil {
+		transferPara := &zt.ZkTransfer{
+			TokenId:       uint64(rightTokenID),
+			Amount:        activeFeeInstr,
+			FromAccountId: matchorder.GetSpotTradeInfo().FromAccountID,
+			ToAccountId:   zt.SystemFeeAccountId,
+		}
+		feeReceipt, err := a.l2Transfer4SpotTrade(transferPara, zt.FromActive)
+		if err != nil {
+			zlog.Error("matchModel.l2TransferProc", "from", matchorder.AccountID, "to", a.fromaddr, "amount", amountInStr, "err", err)
+			return nil, err
+		}
+		matchorder.DigestedFee += activeFee
+		receipts = mergeReceipt(receipts, feeReceipt)
+	}
+
+	or.AVGPrice = calcAVGPrice(or, matchorder.GetSpotTradeInfo().Price, matched)
+	matchorder.AVGPrice = calcAVGPrice(matchorder, matchorder.GetSpotTradeInfo().Price, matched)
+
+	return receipts, nil
+}
+
 func (a *Action) matchModel(
 	leftTokenInfo, rightTokenInfo *zt.ZkTokenSymbol,
 	payload *zt.SpotTradeInfo,
@@ -391,13 +623,8 @@ func (a *Action) matchModel(
 	taker int64,
 	special *zt.ZkSpotTradeWitnessInfo,
 ) ([]*types.ReceiptLog, []*types.KeyValue, error) {
-
-	var logs []*types.ReceiptLog
 	var kvs []*types.KeyValue
 	var matched int64
-
-	leftTokenID, _ := strconv.Atoi(leftTokenInfo.Id)
-	rightTokenID, _ := strconv.Atoi(rightTokenInfo.Id)
 
 	if matchorder.GetBalance() > or.GetBalance() {
 		matched = or.GetBalance()
@@ -411,164 +638,17 @@ func (a *Action) matchModel(
 	var receipts *types.Receipt
 	var err error
 	var ops []*zt.ZkOperation
-	//eth-usdt交易对
-	//case1:如果出售方为发起方时：
-	//case1-op1:将usdt（rightTokenID）发送给发起方（出售方）
-	//          如果对手方就是自己，则直接激活即可
-	//case1-op2:将eth（leftTokenID）发送给订单方（购买方）
 	if payload.Op == zt.OpSell {
-		//Transfer of frozen assets
-		//如果发起交易是出售资产
-		//TODO:关于数量的处理，需要统一考虑 by Hezhenghun on 4.4 2023
-		amountInStr, err := calcActualCost(matchorder.GetSpotTradeInfo().Op, matched, matchorder.GetSpotTradeInfo().Price, coinPrecisionDecimal, int(rightTokenInfo.Decimal))
-		if err != nil {
-			zlog.Error("matchModel", "methodName", "calcActualCost", "from", matchorder.AccountID, "to", a.fromaddr, "amount", amountInStr, "err", err)
-			return nil, nil, err
-		}
-
-		special.Price = matchorder.GetSpotTradeInfo().Price
-		special.RightTokenFrom.AccountID = matchorder.AccountID
-		special.RightTokenFrom.Amount = amountInStr
-		special.RightTokenFrom.TakerMaker = zt.TySpotTradeTakerTransfer
-		if matchorder.AccountID != payload.FromAccountID {
-			//如果对手方和发起方为不同的地址，则将冻结的资产（即划入交易账户的资产）转账到出售方（即通过基础货币进行支付）支付Ｕ
-			transferPara := &zt.ZkTransfer{
-				TokenId:       uint64(rightTokenID),
-				Amount:        amountInStr,
-				FromAccountId: matchorder.AccountID,
-				ToAccountId:   payload.FromAccountID,
-			}
-			receipts, err = a.l2TransferProc(transferPara, zt.TySpotTrade, 18, zt.FromFrozen)
-			if err != nil {
-				zlog.Error("matchModel", "methodName", "l2TransferProc", "from", matchorder.AccountID, "to", a.fromaddr, "amount", amountInStr, "err", err)
-				return nil, nil, err
-			}
-
-		} else {
-			//如果匹配方是自己，则直接解冻相应的资产
-			receipts, err = freezeOrUnfreezeToken(payload.FromAccountID, uint64(rightTokenID|zt.SpotTradeTokenFlag), amountInStr, zt.UnFreeze, a.statedb)
-			if err != nil {
-				zlog.Error("matchModel", "methodName", "freezeOrUnfreezeToken", "from", matchorder.AccountID, "to", a.fromaddr, "amount", amountInStr, "err", err)
-				return nil, nil, err
-			}
-
-			//Charge fee
-			activeFeeInstr, activeFee, err := calcMtfFee(amountInStr, taker, coinPrecision, coinPrecisionDecimal, int(rightTokenInfo.Decimal)) //Transaction fee of the active party
-			if err == nil {
-				feeReceipt, feeQueue, err := a.MakeFeeLog(activeFeeInstr, uint64(rightTokenID|zt.SpotTradeTokenFlag))
-				if err != nil {
-					return nil, nil, errors.Wrapf(err, "MakeFeeLog")
-				}
-				or.DigestedFee += activeFee
-
-				ops = append(ops, feeQueue)
-				receipts = mergeReceipt(receipts, feeReceipt)
-			}
-		}
-
-		//The settlement of the corresponding assets for the transaction to be concluded
-		amountInStr, err = calcActualCost(payload.Op, matched, matchorder.GetSpotTradeInfo().Price, coinPrecisionDecimal, int(leftTokenInfo.Decimal))
+		receipts, err = a.sellerIsTaker(leftTokenInfo, rightTokenInfo, payload, matchorder, matched, or, taker, special)
 		if nil != err {
 			return nil, nil, err
 		}
-		special.LeftTokenFrom.AccountID = payload.FromAccountID
-		special.LeftTokenFrom.Amount = amountInStr
-		special.LeftTokenFrom.TakerMaker = zt.TySpotTradeMakerTransfer
-		if payload.FromAccountID != matchorder.AccountID {
-			//支付标的资产给购买方
-			transferPara := &zt.ZkTransfer{
-				TokenId:       uint64(leftTokenID),
-				Amount:        amountInStr,
-				FromAccountId: payload.FromAccountID,
-				ToAccountId:   matchorder.GetSpotTradeInfo().FromAccountID,
-			}
-			//包括maker支付交易费
-			receipts, err = a.l2TransferProc(transferPara, zt.TySpotTrade, 18, zt.FromActive)
-			if err != nil {
-				zlog.Error("matchModel.l2TransferProc", "transferPara", transferPara, "err", err.Error())
-				return nil, nil, err
-			}
-		}
-
-		or.AVGPrice = caclAVGPrice(or, matchorder.GetSpotTradeInfo().Price, matched)
-		//Calculate the average transaction price
-		matchorder.AVGPrice = caclAVGPrice(matchorder, matchorder.GetSpotTradeInfo().Price, matched)
 	} else {
-		//case2:如果购买方为发起方时：
-		//case2-op1:将eth（leftTokenID）发送给发起方（购买方）
-		//          如果对手方就是自己，则直接激活即可
-		//case2-op2:将usdt（rightTokenID）发送给订单方（出售方）
-		amountInStr, err := calcActualCost(matchorder.GetSpotTradeInfo().Op, matched, matchorder.GetSpotTradeInfo().Price, coinPrecisionDecimal, int(leftTokenInfo.Decimal))
+
+		receipts, err = a.buyerIsTaker(leftTokenInfo, rightTokenInfo, payload, matchorder, matched, or, taker, special)
 		if nil != err {
 			return nil, nil, err
 		}
-		special.Price = matchorder.GetSpotTradeInfo().Price
-		special.LeftTokenFrom.AccountID = matchorder.AccountID
-		special.LeftTokenFrom.Amount = amountInStr
-		special.LeftTokenFrom.TakerMaker = zt.TySpotTradeMakerTransfer
-		if payload.FromAccountID != matchorder.AccountID {
-			//将出售方的冻结标的资产转移至买方，如ETH-USDT交易对中的ETH资产
-			transferPara := &zt.ZkTransfer{
-				TokenId:       uint64(leftTokenID),
-				Amount:        amountInStr,
-				FromAccountId: matchorder.GetSpotTradeInfo().FromAccountID,
-				ToAccountId:   payload.FromAccountID,
-			}
-			receipts, err = a.l2TransferProc(transferPara, zt.TySpotTrade, 18, zt.FromFrozen)
-			if err != nil {
-				zlog.Error("matchModel.l2TransferProc", "from", matchorder.AccountID, "to", a.fromaddr, "amount", amountInStr, "err", err)
-				return nil, nil, err
-			}
-		} else {
-			//如果匹配方是自己，则直接解冻相应的资产
-			receipts, err = freezeOrUnfreezeToken(payload.FromAccountID, uint64(leftTokenID|zt.SpotTradeTokenFlag), amountInStr, zt.UnFreeze, a.statedb)
-			if err != nil {
-				zlog.Error("matchModel.freezeOrUnfreezeToken", "from", matchorder.AccountID, "to", a.fromaddr, "amount", amountInStr, "err", err)
-				return nil, nil, err
-			}
-
-			//Charge fee
-			activeFeeInstr, activeFee, err := calcMtfFee(amountInStr, taker, coinPrecision, coinPrecisionDecimal, int(leftTokenInfo.Decimal))
-			if err == nil {
-				feeReceipt, feeQueue, err := a.MakeFeeLog(activeFeeInstr, uint64(leftTokenID|zt.SpotTradeTokenFlag))
-				if err != nil {
-					return nil, nil, errors.Wrapf(err, "MakeFeeLog")
-				}
-				or.DigestedFee += activeFee
-
-				ops = append(ops, feeQueue)
-				receipts = mergeReceipt(receipts, feeReceipt)
-			}
-		}
-		if err != nil {
-			zlog.Error("matchModel.ExecTransferFrozen2", "from", matchorder.AccountID, "to", a.fromaddr, "amount", amountInStr, "err", err.Error())
-			return nil, nil, err
-		}
-
-		amountInStr, err = calcActualCost(payload.Op, matched, matchorder.GetSpotTradeInfo().Price, coinPrecisionDecimal, int(rightTokenInfo.Decimal))
-		if nil != err {
-			return nil, nil, err
-		}
-		special.RightTokenFrom.AccountID = payload.FromAccountID
-		special.RightTokenFrom.Amount = amountInStr
-		special.RightTokenFrom.TakerMaker = zt.TySpotTradeTakerTransfer
-		if payload.FromAccountID != matchorder.AccountID {
-			//购买方支付基础计价货币USDT
-			transferPara := &zt.ZkTransfer{
-				TokenId:       uint64(rightTokenID),
-				Amount:        amountInStr,
-				FromAccountId: payload.FromAccountID,
-				ToAccountId:   matchorder.GetSpotTradeInfo().FromAccountID,
-			}
-			receipts, err = a.l2TransferProc(transferPara, zt.TySpotTrade, 18, zt.FromActive)
-			if err != nil {
-				zlog.Error("matchModel.l2TransferProc", "from", matchorder.AccountID, "to", a.fromaddr, "amount", amountInStr, "err", err)
-				return nil, nil, err
-			}
-		}
-
-		or.AVGPrice = caclAVGPrice(or, matchorder.GetSpotTradeInfo().Price, matched)
-		matchorder.AVGPrice = caclAVGPrice(matchorder, matchorder.GetSpotTradeInfo().Price, matched)
 	}
 	ops = append(ops, &zt.ZkOperation{Ty: zt.TySpotTrade, Op: &zt.OperationSpecialInfo{Value: &zt.OperationSpecialInfo_SpotTrade{SpotTrade: special}}})
 
@@ -587,10 +667,7 @@ func (a *Action) matchModel(
 	}
 
 	if matched == or.GetBalance() {
-
 		matchorder.Balance -= matched
-		matchorder.Executed = matched
-
 		matchorder.Executed = matched
 
 		kvs = append(kvs, getKVSet(matchorder)...)
@@ -616,7 +693,7 @@ func (a *Action) matchModel(
 	}
 	receipts = mergeReceipt(receipts, r)
 
-	return logs, kvs, nil
+	return receipts.Logs, receipts.KV, nil
 }
 
 func getKVSet(order *zt.Order) (kvset []*types.KeyValue) {
@@ -777,7 +854,7 @@ func safeMul(x, y, coinPrecision int64) int64 {
 }
 
 // Calculate the average transaction price
-func caclAVGPrice(order *zt.Order, price, amount int64) int64 {
+func calcAVGPrice(order *zt.Order, price, amount int64) int64 {
 	amountBig := big.NewInt(amount)
 	priceBig := big.NewInt(price)
 	avgPrice := big.NewInt(order.AVGPrice)

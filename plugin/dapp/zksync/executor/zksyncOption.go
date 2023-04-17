@@ -652,6 +652,103 @@ func (a *Action) transfer2Trade(para *transfer2TradePara) (*types.Receipt, error
 }
 
 // trasfer, tree2contract, contract2tree 本质都是transfer，这里共用一个transferProc
+func (a *Action) l2Transfer4SpotTrade(payload *zt.ZkTransfer, tokenSource zt.TokenSource) (*types.Receipt, error) {
+	var logs []*types.ReceiptLog
+	var kvs []*types.KeyValue
+
+	err := checkAmount(payload.Amount)
+	if err != nil {
+		return nil, errors.Wrapf(err, "checkParam")
+	}
+	err = checkPackValue(payload.Amount, zt.PacAmountManBitWidth)
+	if err != nil {
+		return nil, errors.Wrapf(err, "checkPackVal")
+	}
+
+	if !checkIsNormalToken(payload.TokenId) {
+		return nil, errors.Wrapf(types.ErrNotAllow, "tokenId=%d should less than system NFT base ID=%d", payload.TokenId, zt.SystemNFTTokenId)
+	}
+
+	special := &zt.ZkTransferWitnessInfo{
+		FromAccountID: payload.FromAccountId,
+		ToAccountID:   payload.ToAccountId,
+		TokenID:       payload.TokenId,
+		Amount:        payload.Amount,
+		Fee:           &zt.ZkFee{Fee: "0"},
+		BlockInfo:     &zt.OpBlockInfo{Height: a.height, TxIndex: int32(a.index)},
+	}
+	operation := &zt.ZkOperation{Ty: zt.TyTransferAction, Op: &zt.OperationSpecialInfo{Value: &zt.OperationSpecialInfo_Transfer{Transfer: special}}}
+
+	fromLeaf, err := GetLeafByAccountId(a.statedb, payload.GetFromAccountId())
+	if err != nil {
+		return nil, errors.Wrapf(err, "db.GetLeafByAccountId")
+	}
+	if fromLeaf == nil {
+		return nil, errors.New("account not exist")
+	}
+	fromTokenID := payload.GetTokenId() | zt.SpotTradeTokenFlag
+	fromToken, err := GetTokenByAccountIdAndTokenId(a.statedb, payload.FromAccountId, fromTokenID)
+	if err != nil {
+		return nil, errors.Wrapf(err, "db.GetTokenByAccountIdAndTokenId")
+	}
+	err = checkTokenBalance(fromToken, payload.Amount)
+	if err != nil {
+		return nil, errors.Wrapf(err, "db.checkAmount")
+	}
+
+	//1.操作from 账户
+	fromKVs, _, receiptFrom, err := applyL2AccountUpdate(fromLeaf.GetAccountId(), fromTokenID, payload.Amount, zt.Sub, a.statedb, fromLeaf, false, tokenSource)
+	if nil != err {
+		return nil, errors.Wrapf(err, "applyL2AccountUpdate")
+	}
+	kvs = append(kvs, fromKVs...)
+
+	//2.操作to 账户
+	toLeaf, err := GetLeafByAccountId(a.statedb, payload.ToAccountId)
+	if err != nil {
+		return nil, errors.Wrapf(err, "db.GetLeafByAccountId")
+	}
+	if toLeaf == nil {
+		return nil, errors.New("account not exist")
+	}
+
+	toTokenID := payload.GetTokenId() | zt.SpotTradeTokenFlag
+	toKVs, _, receiptTo, err := applyL2AccountUpdate(toLeaf.GetAccountId(), toTokenID, payload.GetAmount(), zt.Add, a.statedb, toLeaf, false, zt.FromActive)
+	if nil != err {
+		return nil, errors.Wrapf(err, "applyL2AccountUpdate")
+	}
+	kvs = append(kvs, toKVs...)
+	transferLog := &zt.TransferReceipt4L2{
+		From: receiptFrom,
+		To:   receiptTo,
+	}
+	l2Transferlog := &types.ReceiptLog{
+		Ty:  zt.TyTransferLog,
+		Log: types.Encode(transferLog),
+	}
+
+	logs = append(logs, l2Transferlog)
+	receipts := &types.Receipt{Ty: types.ExecOk, KV: kvs, Logs: logs}
+
+	//在acctId=SystemFeeAccountId 时候未把kv设进fee，和下面的fee op处理冲突，这里需要把kv设进db
+	err = saveKvs(a.statedb, receipts.KV)
+	if err != nil {
+		return nil, err
+	}
+
+	//add transfer & fee queue
+	var ops []*zt.ZkOperation
+	ops = append(ops, operation)
+	r, _, err := setL2QueueData(a.statedb, ops)
+	if err != nil {
+		return nil, err
+	}
+	receipts = mergeReceipt(receipts, r)
+
+	return receipts, nil
+}
+
+// trasfer, tree2contract, contract2tree 本质都是transfer，这里共用一个transferProc
 func (a *Action) l2TransferProc(payload *zt.ZkTransfer, actionTy int32, decimal int, tokenSource zt.TokenSource) (*types.Receipt, error) {
 	var logs []*types.ReceiptLog
 	var kvs []*types.KeyValue
