@@ -121,7 +121,7 @@ func (a *Action) ZkRevokeTrade(payload *zt.ZkRevokeTrade) (*types.Receipt, error
 
 func (a *Action) ZkTransfer2Ex(payload *zt.ZkTransfer2Ex, actionTy int32) (*types.Receipt, error) {
 	if actionTy != zt.TyTransfer2Trade && actionTy != zt.TyTransferFromTrade {
-		return nil, errors.New("Neigher TyTransfer2Trade nor TyTransferFromTrade")
+		return nil, errors.New("Neither TyTransfer2Trade nor TyTransferFromTrade")
 	}
 
 	tokenID := payload.TokenID
@@ -189,9 +189,9 @@ func (a *Action) matchLimitOrder(tradeInfo *zt.SpotTradeInfo) (*types.Receipt, e
 		maker = tradePair2Fee.MakerRate
 	}
 
-	or := &zt.Order{
+	or := &zt.SpotTradeOrder{
 		OrderID:    a.GetIndex(),
-		Value:      &zt.Order_SpotTradeInfo{tradeInfo},
+		Value:      &zt.SpotTradeOrder_SpotTradeInfo{tradeInfo},
 		Ty:         et.TyLimitOrderAction,
 		Executed:   0,
 		AVGPrice:   0,
@@ -204,7 +204,7 @@ func (a *Action) matchLimitOrder(tradeInfo *zt.SpotTradeInfo) (*types.Receipt, e
 		Hash:       hex.EncodeToString(a.txhash),
 		CreateTime: a.blocktime,
 	}
-	re := &zt.ReceiptExchange{
+	re := &zt.SpotTradeReceiptExchange{
 		Order: or,
 		Index: a.GetIndex(),
 	}
@@ -220,12 +220,12 @@ func (a *Action) matchLimitOrder(tradeInfo *zt.SpotTradeInfo) (*types.Receipt, e
 			break
 		}
 		//Obtain price information of existing market listing
-		marketDepthList, _ := queryMarketDepthList(a.localDB, leftTokenID, rightTokenID, opSwap(tradeInfo.Op), priceKey, zt.Count)
+		marketDepthList, _ := queryMarketDepthList(a.localDB, leftTokenID, rightTokenID, OpSwap(tradeInfo.Op), priceKey, zt.Count)
 		if marketDepthList == nil || len(marketDepthList.List) == 0 {
 			break
 		}
 		for _, marketDepth := range marketDepthList.List {
-			zlog.Info("LimitOrder debug find depth", "height", a.height, "amount", marketDepth.Amount, "price", marketDepth.Price, "order-price", tradeInfo.GetPrice(), "op", opSwap(tradeInfo.Op), "index", a.GetIndex())
+			zlog.Info("LimitOrder debug find depth", "height", a.height, "amount", marketDepth.Amount, "price", marketDepth.Price, "order-price", tradeInfo.GetPrice(), "op", OpSwap(tradeInfo.Op), "index", a.GetIndex())
 			if count >= et.MaxMatchCount {
 				done = true
 				break
@@ -246,7 +246,7 @@ func (a *Action) matchLimitOrder(tradeInfo *zt.SpotTradeInfo) (*types.Receipt, e
 					done = true
 					break
 				}
-				orderList, err := findOrderIDListByPrice(a.localDB, leftTokenID, rightTokenID, marketDepth.Price, opSwap(tradeInfo.Op), et.ListASC, orderKey)
+				orderList, err := findOrderIDListByPrice(a.localDB, leftTokenID, rightTokenID, marketDepth.Price, OpSwap(tradeInfo.Op), et.ListASC, orderKey)
 				if orderList != nil && !hasOrder {
 					hasOrder = true
 				}
@@ -254,7 +254,7 @@ func (a *Action) matchLimitOrder(tradeInfo *zt.SpotTradeInfo) (*types.Receipt, e
 					if err == types.ErrNotFound {
 						break
 					}
-					zlog.Error("findOrderIDListByPrice error", "height", a.height, "token ID", leftTokenID, "price", marketDepth.Price, "op", opSwap(tradeInfo.Op), "error", err)
+					zlog.Error("findOrderIDListByPrice error", "height", a.height, "token ID", leftTokenID, "price", marketDepth.Price, "op", OpSwap(tradeInfo.Op), "error", err)
 					return nil, err
 				}
 				for _, matchorder := range orderList.List {
@@ -307,7 +307,7 @@ func (a *Action) matchLimitOrder(tradeInfo *zt.SpotTradeInfo) (*types.Receipt, e
 				orderKey = orderList.PrimaryKey
 			}
 			if !hasOrder {
-				var matchorder zt.Order
+				var matchorder zt.SpotTradeOrder
 				matchorder.UpdateTime = a.blocktime
 				matchorder.Status = et.Completed
 				matchorder.Balance = 0
@@ -392,9 +392,9 @@ func freezeOrUnfreezeToken(from, tokenID uint64, amount string, option int32, st
 func (a *Action) sellerIsTaker(
 	leftTokenInfo, rightTokenInfo *zt.ZkTokenSymbol,
 	payload *zt.SpotTradeInfo,
-	matchorder *zt.Order,
+	matchorder *zt.SpotTradeOrder,
 	matched int64,
-	or *zt.Order,
+	or *zt.SpotTradeOrder,
 	taker int64,
 	special *zt.ZkSpotTradeWitnessInfo,
 ) (*types.Receipt, error) {
@@ -512,9 +512,9 @@ func (a *Action) sellerIsTaker(
 func (a *Action) buyerIsTaker(
 	leftTokenInfo, rightTokenInfo *zt.ZkTokenSymbol,
 	payload *zt.SpotTradeInfo,
-	matchorder *zt.Order,
+	matchorder *zt.SpotTradeOrder,
 	matched int64,
-	or *zt.Order,
+	or *zt.SpotTradeOrder,
 	taker int64,
 	special *zt.ZkSpotTradeWitnessInfo,
 ) (*types.Receipt, error) {
@@ -617,9 +617,9 @@ func (a *Action) buyerIsTaker(
 func (a *Action) matchModel(
 	leftTokenInfo, rightTokenInfo *zt.ZkTokenSymbol,
 	payload *zt.SpotTradeInfo,
-	matchorder *zt.Order,
-	or *zt.Order,
-	re *zt.ReceiptExchange,
+	matchorder *zt.SpotTradeOrder,
+	or *zt.SpotTradeOrder,
+	re *zt.SpotTradeReceiptExchange,
 	taker int64,
 	special *zt.ZkSpotTradeWitnessInfo,
 ) ([]*types.ReceiptLog, []*types.KeyValue, error) {
@@ -696,7 +696,7 @@ func (a *Action) matchModel(
 	return receipts.Logs, receipts.KV, nil
 }
 
-func getKVSet(order *zt.Order) (kvset []*types.KeyValue) {
+func getKVSet(order *zt.SpotTradeOrder) (kvset []*types.KeyValue) {
 	kvset = append(kvset, &types.KeyValue{Key: calcOrderKey(order.OrderID), Value: types.Encode(order)})
 	return kvset
 }
@@ -704,13 +704,13 @@ func getKVSet(order *zt.Order) (kvset []*types.KeyValue) {
 // Query the status database according to the order number
 // Localdb deletion sequence: delete the cache in real time first, and modify the DB uniformly during block generation.
 // The cache data will be deleted. However, if the cache query fails, the deleted data can still be queried in the DB
-func findOrderByOrderID(statedb dbm.KV, orderID int64) (*zt.Order, error) {
+func findOrderByOrderID(statedb dbm.KV, orderID int64) (*zt.SpotTradeOrder, error) {
 	data, err := statedb.Get(calcOrderKey(orderID))
 	if err != nil {
 		zlog.Error("findOrderByOrderID.Get", "orderID", orderID, "err", err.Error())
 		return nil, err
 	}
-	var order zt.Order
+	var order zt.SpotTradeOrder
 	err = types.Decode(data, &order)
 	if err != nil {
 		zlog.Error("findOrderByOrderID.Decode", "orderID", orderID, "err", err.Error())
@@ -753,7 +753,7 @@ func findOrderIDListByPrice(localdb dbm.KV, leftTokenID, rightTokenID uint32, pr
 
 // queryMarketDepthList 这里primaryKey当作主键索引来用，
 // The first query does not need to fill in the value, pay according to the price from high to low, selling orders according to the price from low to high query
-func queryMarketDepthList(localdb dbm.KV, leftTokenID, rightTokenID uint32, op int32, primaryKey string, count int32) (*zt.MarketDepthList, error) {
+func queryMarketDepthList(localdb dbm.KV, leftTokenID, rightTokenID uint32, op int32, primaryKey string, count int32) (*zt.SpotTradeMarketDepthList, error) {
 	table := NewMarketDepthTable(localdb)
 	prefix := []byte(fmt.Sprintf("%d:%d:%d", leftTokenID, rightTokenID, op))
 	if count == 0 {
@@ -770,9 +770,9 @@ func queryMarketDepthList(localdb dbm.KV, leftTokenID, rightTokenID uint32, op i
 		return nil, err
 	}
 
-	var list zt.MarketDepthList
+	var list zt.SpotTradeMarketDepthList
 	for _, row := range rows {
-		list.List = append(list.List, row.Data.(*zt.MarketDepth))
+		list.List = append(list.List, row.Data.(*zt.SpotTradeMarketDepth))
 	}
 	if len(rows) == int(count) {
 		list.PrimaryKey = string(rows[len(rows)-1].Primary)
@@ -854,7 +854,7 @@ func safeMul(x, y, coinPrecision int64) int64 {
 }
 
 // Calculate the average transaction price
-func calcAVGPrice(order *zt.Order, price, amount int64) int64 {
+func calcAVGPrice(order *zt.SpotTradeOrder, price, amount int64) int64 {
 	amountBig := big.NewInt(amount)
 	priceBig := big.NewInt(price)
 	avgPrice := big.NewInt(order.AVGPrice)
@@ -883,7 +883,7 @@ func calcMtfFee(cost string, rate, coinPrecision int64, decimalFrom, decimalTo i
 	return feeStr, fee.Int64(), err
 }
 
-func opSwap(op int32) int32 {
+func OpSwap(op int32) int32 {
 	if op == et.OpBuy {
 		return et.OpSell
 	}

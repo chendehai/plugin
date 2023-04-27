@@ -74,23 +74,23 @@ func NewHistoryOrderTable(kvdb db.KV) *table.Table {
 
 // OrderRow table meta 结构
 type OrderRow struct {
-	*zty.Order
+	*zty.SpotTradeOrder
 }
 
 // NewOrderRow 新建一个meta 结构
 func NewOrderRow() *OrderRow {
-	return &OrderRow{Order: &zty.Order{}}
+	return &OrderRow{SpotTradeOrder: &zty.SpotTradeOrder{}}
 }
 
 // CreateRow ...
 func (r *OrderRow) CreateRow() *table.Row {
-	return &table.Row{Data: &zty.Order{}}
+	return &table.Row{Data: &zty.SpotTradeOrder{}}
 }
 
 // SetPayload 设置数据
 func (r *OrderRow) SetPayload(data types.Message) error {
-	if txdata, ok := data.(*zty.Order); ok {
-		r.Order = txdata
+	if txdata, ok := data.(*zty.SpotTradeOrder); ok {
+		r.SpotTradeOrder = txdata
 		return nil
 	}
 	return types.ErrTypeAsset
@@ -110,23 +110,23 @@ func (r *OrderRow) Get(key string) ([]byte, error) {
 
 // HistoryOrderRow table meta 结构
 type HistoryOrderRow struct {
-	*zty.Order
+	*zty.SpotTradeOrder
 }
 
 // NewHistoryOrderRow ...
 func NewHistoryOrderRow() *HistoryOrderRow {
-	return &HistoryOrderRow{Order: &zty.Order{Value: &zty.Order_SpotTradeInfo{SpotTradeInfo: &zty.SpotTradeInfo{}}}}
+	return &HistoryOrderRow{SpotTradeOrder: &zty.SpotTradeOrder{Value: &zty.SpotTradeOrder_SpotTradeInfo{SpotTradeInfo: &zty.SpotTradeInfo{}}}}
 }
 
 // CreateRow ...
 func (m *HistoryOrderRow) CreateRow() *table.Row {
-	return &table.Row{Data: &zty.Order{Value: &zty.Order_SpotTradeInfo{SpotTradeInfo: &zty.SpotTradeInfo{}}}}
+	return &table.Row{Data: &zty.SpotTradeOrder{Value: &zty.SpotTradeOrder_SpotTradeInfo{SpotTradeInfo: &zty.SpotTradeInfo{}}}}
 }
 
 // SetPayload 设置数据
 func (m *HistoryOrderRow) SetPayload(data types.Message) error {
-	if txdata, ok := data.(*zty.Order); ok {
-		m.Order = txdata
+	if txdata, ok := data.(*zty.SpotTradeOrder); ok {
+		m.SpotTradeOrder = txdata
 		return nil
 	}
 	return types.ErrTypeAsset
@@ -146,23 +146,23 @@ func (m *HistoryOrderRow) Get(key string) ([]byte, error) {
 
 // MarketDepthRow table meta 结构
 type MarketDepthRow struct {
-	*zty.MarketDepth
+	*zty.SpotTradeMarketDepth
 }
 
 // NewMarketDepthRow 新建一个meta 结构
 func NewMarketDepthRow() *MarketDepthRow {
-	return &MarketDepthRow{MarketDepth: &zty.MarketDepth{}}
+	return &MarketDepthRow{SpotTradeMarketDepth: &zty.SpotTradeMarketDepth{}}
 }
 
 // CreateRow 新建数据行(注意index 数据一定也要保存到数据中,不能就保存eventid)
 func (m *MarketDepthRow) CreateRow() *table.Row {
-	return &table.Row{Data: &zty.MarketDepth{}}
+	return &table.Row{Data: &zty.SpotTradeMarketDepth{}}
 }
 
 // SetPayload 设置数据
 func (m *MarketDepthRow) SetPayload(data types.Message) error {
-	if txdata, ok := data.(*zty.MarketDepth); ok {
-		m.MarketDepth = txdata
+	if txdata, ok := data.(*zty.SpotTradeMarketDepth); ok {
+		m.SpotTradeMarketDepth = txdata
 		return nil
 	}
 	return types.ErrTypeAsset

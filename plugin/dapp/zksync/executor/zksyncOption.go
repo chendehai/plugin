@@ -591,7 +591,7 @@ func (a *Action) transfer2Trade(para *transfer2TradePara) (*types.Receipt, error
 	if err != nil {
 		return nil, errors.Wrapf(err, "checkParam")
 	}
-	if !checkIsNormalToken(para.FromTokenId) {
+	if !checkIsNormalToken(para.FromTokenId) && !checkIsSpotTradeToken(para.FromTokenId) {
 		return nil, errors.Wrapf(types.ErrNotAllow, "tokenId=%d should less than system NFT base ID=%d", para.FromTokenId, zt.SystemNFTTokenId)
 	}
 
@@ -1360,7 +1360,17 @@ func checkAmount(amount string) error {
 
 // not NFT token
 func checkIsNormalToken(id uint64) bool {
-	return id < zt.SystemNFTTokenId
+	return id < zt.SystemTokenIdMax
+}
+
+// checkIsSpotTradeToken 检查是否是现货交易的tokenid
+func checkIsSpotTradeToken(id uint64) bool {
+	return id&zt.SpotTradeTokenFlag == zt.SpotTradeTokenFlag && checkIsNormalToken(id-zt.SpotTradeTokenFlag)
+}
+
+// checkIsForeverContractTradeToken 检查是否是永续合约的tokenid
+func checkIsForeverContractTradeToken(id uint64) bool {
+	return id&zt.ForeverContractTradeTokenFlag == zt.ForeverContractTradeTokenFlag && checkIsNormalToken(id-zt.ForeverContractTradeTokenFlag)
 }
 
 func checkIsNFTToken(id uint64) bool {

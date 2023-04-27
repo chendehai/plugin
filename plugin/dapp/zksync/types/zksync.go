@@ -35,6 +35,11 @@ const (
 	TyWithdrawNFTAction    = 13
 	TyTransferNFTAction    = 14
 
+	TySpotTradeAction   = 20
+	TyRevokeTradeAction = 21
+	TyTransfer2ExAction = 22
+	TySetSpotFeeAction  = 23
+
 	//纯特殊电路类型，非Zksync合约使用的action
 	TyContractToTreeNewAction = 30 //合约账户转入新的叶子
 
@@ -70,6 +75,11 @@ const (
 	NameMintNFTAction        = "MintNFT"
 	NameWithdrawNFTACTION    = "WithdrawNFT"
 	NameTransferNFTAction    = "TransferNFT"
+
+	NameSpotTradeAction   = "SpotTrade"
+	NameRevokeTradeAction = "RevokeTrade"
+	NameTransfer2ExAction = "Transfer2Ex"
+	NameSetSpotFeeAction  = "SetSpotFee"
 
 	NameContractToTreeNewAction = "ContractToTreeNew"
 
@@ -215,7 +225,8 @@ const (
 	SystemTree2ContractAcctId = 3
 	//SystemNFTTokenId 作为一个NFT token标记 低于NFTTokenId 为FT token id, 高于NFTTokenId为 NFT token id，即从NFTTokenId+1开始作为NFT资产
 	SystemNFTTokenId = 256 //2^8,
-
+	//SystemTokenIdMax 最大的资金tokenid
+	SystemTokenIdMax = 16 //2^4
 	//TokenPathDepth 支持的资产种类数量
 	TokenPathDepth                = 4                             //支持token数为 2^(depth-1)
 	SpotTradeTokenFlag            = (0x1 << TokenPathDepth)       //现货资产高位token ID
@@ -275,6 +286,10 @@ var (
 		NameMintNFTAction:        TyMintNFTAction,
 		NameWithdrawNFTACTION:    TyWithdrawNFTAction,
 		NameTransferNFTAction:    TyTransferNFTAction,
+		NameSpotTradeAction:      TySpotTradeAction,
+		NameRevokeTradeAction:    TyRevokeTradeAction,
+		NameTransfer2ExAction:    TyTransfer2ExAction,
+		NameSetSpotFeeAction:     TySetSpotFeeAction,
 		NameSetTokenSymbolAction: TySetTokenSymbolAction,
 		NameSetExodusMode:        TySetExodusModeAction,
 		NameAssetTransfer:        TyAssetTransferAction,
@@ -315,6 +330,9 @@ var (
 		TyDepositRollbackLog:       {Ty: reflect.TypeOf(AccountTokenBalanceReceipt{}), Name: "TyDepositRollbackLog"},
 		TyWithdrawRollbackLog:      {Ty: reflect.TypeOf(AccountTokenBalanceReceipt{}), Name: "TyWithdrawRollbackLog"},
 		TyPriority2QueIdLog:        {Ty: reflect.TypeOf(Priority2QueueId{}), Name: "TyPriority2QueueIdLog"},
+		TySpotTradeOrderLog:        {Ty: reflect.TypeOf(ReceiptSpotTradeFee{}), Name: "TySpotTradeOrderLog"},
+		TyTransfer2TradeLog:        {Ty: reflect.TypeOf(ReceiptSpotTradeFee{}), Name: "TyTransfer2TradeLog"},
+		TyRevokeOrderLog:           {Ty: reflect.TypeOf(ReceiptSpotTradeFee{}), Name: "TyRevokeOrderLog"},
 		TySetSpotTradeFeeLog:       {Ty: reflect.TypeOf(ReceiptSpotTradeFee{}), Name: "TySetSpotTradeFeeLog"},
 	}
 

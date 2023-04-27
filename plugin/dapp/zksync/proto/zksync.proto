@@ -2,7 +2,7 @@ syntax = "proto3";
 import "witness.proto";
 import "common.proto";
 import "transaction.proto";
-import "exchange.proto";
+import "zkexchange.proto";
 
 package types;
 option go_package = "../types";
@@ -16,8 +16,9 @@ message ZksyncAction {
     ZkProxyExit proxyExit           = 5;
     ZkSetPubKey setPubKey           = 6;
     ZkFullExit  fullExit            = 7;
-    ZkContractToTree contractToTree = 8;
-    ZkTreeToContract treeToContract = 9;
+    ZkSwap  swap                    = 8;
+    ZkContractToTree contractToTree = 9;
+    ZkTreeToContract treeToContract = 10;
 
     ZkMintNFT     mintNFT           = 12;
     ZkWithdrawNFT withdrawNFT       = 13;
@@ -43,7 +44,7 @@ message ZksyncAction {
     types.AssetsTransferToExec  transferToExec  = 42;
   }
 
-  int32 ty = 50;
+  int32 ty = 15;
 }
 
 message ZkTokenSymbol {
@@ -198,7 +199,6 @@ message ZkFullExit {
 }
 
 message ZkSwap {
-
   ZkSignature signature = 1;
 }
 

@@ -1,7 +1,6 @@
 package executor
 
 import (
-	"errors"
 	"fmt"
 	"github.com/33cn/chain33/common/db/table"
 	"github.com/33cn/chain33/types"
@@ -98,7 +97,7 @@ func (z *zksync) interExecLocal(tx *types.Transaction, receiptData *types.Receip
 		for _, log := range receiptData.Logs {
 			switch log.Ty {
 			case zty.TySpotTradeOrderLog, zty.TyRevokeOrderLog, zty.TyTransfer2TradeLog:
-				receipt := &zty.ReceiptExchange{}
+				receipt := &zty.SpotTradeReceiptExchange{}
 				if err := types.Decode(log.Log, receipt); err != nil {
 					return nil, err
 				}
@@ -148,7 +147,7 @@ func (z *zksync) addAutoRollBack(tx *types.Transaction, kv []*types.KeyValue) *t
 	return dbSet
 }
 
-func (z *zksync) updateIndex(marketTable, orderTable, historyTable *table.Table, receipt *zty.ReceiptExchange) (kvs []*types.KeyValue) {
+func (z *zksync) updateIndex(marketTable, orderTable, historyTable *table.Table, receipt *zty.SpotTradeReceiptExchange) (kvs []*types.KeyValue) {
 	switch receipt.Order.Status {
 	case zty.Ordered:
 		err := z.updateOrder(marketTable, orderTable, historyTable, receipt.GetOrder(), receipt.GetIndex())
@@ -178,14 +177,14 @@ func (z *zksync) updateIndex(marketTable, orderTable, historyTable *table.Table,
 	return
 }
 
-func (z *zksync) updateOrder(marketTable, orderTable, historyTable *table.Table, order *zty.Order, index int64) error {
+func (z *zksync) updateOrder(marketTable, orderTable, historyTable *table.Table, order *zty.SpotTradeOrder, index int64) error {
 	left := order.GetSpotTradeInfo().LeftAssetTokenID
 	right := order.GetSpotTradeInfo().RightAssetTokenID
 	op := order.GetSpotTradeInfo().GetOp()
 	price := order.GetSpotTradeInfo().GetPrice()
 	switch order.Status {
 	case zty.Ordered:
-		var markDepth zty.MarketDepth
+		var markDepth zty.SpotTradeMarketDepth
 		depth, err := queryMarketDepth(marketTable, left, right, op, price)
 		if err == types.ErrNotFound {
 			markDepth.Price = price
@@ -215,7 +214,7 @@ func (z *zksync) updateOrder(marketTable, orderTable, historyTable *table.Table,
 			zlog.Error("updateOrder", "historyTable.Replace", err.Error())
 		}
 	case zty.Revoked:
-		var marketDepth zty.MarketDepth
+		var marketDepth zty.SpotTradeMarketDepth
 		depth, err := queryMarketDepth(marketTable, left, right, op, price)
 		if depth != nil {
 			marketDepth.Price = price
@@ -223,21 +222,12 @@ func (z *zksync) updateOrder(marketTable, orderTable, historyTable *table.Table,
 			marketDepth.RightAssetTokenID = right
 			marketDepth.Op = op
 
-			depthAmount, ok := new(big.Int).SetString(depth.Amount, 0)
-			if !ok {
-				zlog.Error("updateOrder", "Failed to set depth Amount which is:", depth.Amount)
-				return errors.New("ErrWrongDepthAmount")
+			depthAmount := new(big.Int).SetInt64(depth.Amount)
+			orderBalance := new(big.Int).SetInt64(order.Balance)
 
-			}
-			orderBalance, ok := new(big.Int).SetString(order.Balance, 0)
-			if !ok {
-				zlog.Error("updateOrder", "Failed to set order Balance which is:", order.Balance)
-				return errors.New("ErrWrongOrderBalance")
-
-			}
 			zeroBig := new(big.Int)
 			marketDepthAmount := depthAmount.Sub(depthAmount, orderBalance)
-			marketDepth.Amount = marketDepthAmount.String()
+			marketDepth.Amount = marketDepthAmount.Int64()
 
 			if marketDepthAmount.Cmp(zeroBig) > 0 {
 				err = marketTable.Replace(&marketDepth)
@@ -267,7 +257,7 @@ func (z *zksync) updateOrder(marketTable, orderTable, historyTable *table.Table,
 	return nil
 }
 
-func (z *zksync) updateMatchOrders(marketTable, orderTable, historyTable *table.Table, order *zty.Order, matchOrders []*zty.Order, index int64) error {
+func (z *zksync) updateMatchOrders(marketTable, orderTable, historyTable *table.Table, order *zty.SpotTradeOrder, matchOrders []*zty.SpotTradeOrder, index int64) error {
 	left := order.GetSpotTradeInfo().GetLeftAssetTokenID()
 	right := order.GetSpotTradeInfo().GetRightAssetTokenID()
 	op := order.GetSpotTradeInfo().GetOp()
@@ -276,18 +266,18 @@ func (z *zksync) updateMatchOrders(marketTable, orderTable, historyTable *table.
 		return nil
 	}
 
-	cache := make(map[string]*big.Int)
+	cache := make(map[int64]*big.Int)
 	zeroBigInt := new(big.Int)
 	for i, matchOrder := range matchOrders {
-		matchOrderBalance, _ := new(big.Int).SetString(matchOrder.Balance, 0)
-		matchOrderExecuted, _ := new(big.Int).SetString(matchOrder.Balance, 0)
+		matchOrderBalance := new(big.Int).SetInt64(matchOrder.Balance)
+		matchOrderExecuted := new(big.Int).SetInt64(matchOrder.Balance)
 		if matchOrderBalance.Cmp(zeroBigInt) <= 0 && matchOrderExecuted.Cmp(zeroBigInt) <= 0 {
-			var matchDepth zty.MarketDepth
+			var matchDepth zty.SpotTradeMarketDepth
 			matchDepth.Price = matchOrder.AVGPrice
 			matchDepth.LeftAssetTokenID = left
 			matchDepth.RightAssetTokenID = right
 			matchDepth.Op = OpSwap(op)
-			matchDepth.Amount = "0"
+			matchDepth.Amount = 0
 			err := marketTable.DelRow(&matchDepth)
 			if err != nil && err != types.ErrNotFound {
 				zlog.Error("updateMatchOrders", "marketTable.DelRow", err.Error())
@@ -316,7 +306,7 @@ func (z *zksync) updateMatchOrders(marketTable, orderTable, historyTable *table.
 	}
 
 	for pr, executed := range cache {
-		var matchDepth zty.MarketDepth
+		var matchDepth zty.SpotTradeMarketDepth
 		depth, err := queryMarketDepth(marketTable, left, right, OpSwap(op), pr)
 		if err != nil {
 			zlog.Error("updateMatchOrders", "Failed to set depth.Amount", depth.Amount, "error", err.Error())
@@ -326,14 +316,10 @@ func (z *zksync) updateMatchOrders(marketTable, orderTable, historyTable *table.
 		matchDepth.LeftAssetTokenID = left
 		matchDepth.RightAssetTokenID = right
 		matchDepth.Op = OpSwap(op)
-		depthAmount, ok := new(big.Int).SetString(depth.Amount, 0)
-		if !ok {
-			zlog.Error("updateMatchOrders", "Failed to set depth.Amount", depth.Amount, "error", err.Error())
-			return err
-		}
+		depthAmount := new(big.Int).SetInt64(depth.Amount)
 
 		matchDepthAmount := depthAmount.Sub(depthAmount, executed)
-		matchDepth.Amount = matchDepthAmount.String()
+		matchDepth.Amount = matchDepthAmount.Int64()
 
 		if matchDepthAmount.Cmp(zeroBigInt) > 0 {
 			err = marketTable.Replace(&matchDepth)
@@ -353,7 +339,7 @@ func (z *zksync) updateMatchOrders(marketTable, orderTable, historyTable *table.
 	return nil
 }
 
-func queryMarketDepth(marketTable *table.Table, leftTokenID, rightTokenID uint32, op int32, price string) (*zty.MarketDepth, error) {
+func queryMarketDepth(marketTable *table.Table, leftTokenID, rightTokenID uint32, op int32, price int64) (*zty.SpotTradeMarketDepth, error) {
 	primaryKey := []byte(fmt.Sprintf("%d:%d:%d:%s", leftTokenID, rightTokenID, op, price))
 	row, err := marketTable.GetData(primaryKey)
 	if err != nil {
@@ -363,5 +349,5 @@ func queryMarketDepth(marketTable *table.Table, leftTokenID, rightTokenID uint32
 		}
 		return nil, err
 	}
-	return row.Data.(*zty.MarketDepth), nil
+	return row.Data.(*zty.SpotTradeMarketDepth), nil
 }
