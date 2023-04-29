@@ -2068,8 +2068,8 @@ func (a *Action) setExodusMode(payload *zt.ZkExodusMode) (*types.Receipt, error)
 	switch payload.Mode {
 	case zt.NormalMode:
 		//只有管理员可以设置normal mode,防止有可能verifier私钥被盗的场景
-		if !isSuperManager(cfg, a.fromaddr) {
-			return nil, errors.Wrapf(types.ErrNotAllow, "not manager")
+		if !isSuperManager(cfg, a.fromaddr) && !isVerifier(a.statedb, a.fromaddr) {
+			return nil, errors.Wrapf(types.ErrNotAllow, "not manager or verifier")
 		}
 		if mode != zt.PauseMode {
 			return nil, errors.Wrapf(types.ErrNotAllow, "current mode=%d", mode)
