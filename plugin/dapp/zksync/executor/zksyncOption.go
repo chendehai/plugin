@@ -898,7 +898,7 @@ func (a *Action) ProxyExit(payload *zt.ZkProxyExit) (*types.Receipt, error) {
 		return nil, errors.Wrapf(err, "GetLeafByAccountId")
 	}
 	//如果targetId已经设置过pubkey，说明用户地址设置没错，由用户自己提款
-	if targetLeaf == nil || targetLeaf.PubKey != nil {
+	if targetLeaf == nil {
 		return nil, errors.Wrapf(types.ErrNotAllow, "target account=%d not exist or pubkey existed", payload.TargetId)
 	}
 
