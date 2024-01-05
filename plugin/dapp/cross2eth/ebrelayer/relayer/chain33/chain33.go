@@ -33,7 +33,7 @@ import (
 
 var relayerLog = log.New("module", "chain33_relayer")
 
-//Relayer4Chain33 ...
+// Relayer4Chain33 ...
 type Relayer4Chain33 struct {
 	syncEvmTxLogs       *syncTx.EVMTxLogs
 	rpcLaddr            string //用户向指定的blockchain节点进行rpc调用
@@ -111,16 +111,16 @@ func StartChain33Relayer(startPara *Chain33StartPara) *Relayer4Chain33 {
 		delayedSendTime:         startPara.DelayedSendTime,
 	}
 
-	syncCfg := &ebTypes.SyncTxReceiptConfig{
-		Chain33Host:       startPara.SyncTxConfig.Chain33Host,
-		PushHost:          startPara.SyncTxConfig.PushHost,
-		PushName:          startPara.SyncTxConfig.PushName,
-		PushBind:          startPara.SyncTxConfig.PushBind,
-		StartSyncHeight:   startPara.SyncTxConfig.StartSyncHeight,
-		StartSyncSequence: startPara.SyncTxConfig.StartSyncSequence,
-		StartSyncHash:     startPara.SyncTxConfig.StartSyncHash,
-		KeepAliveDuration: startPara.SyncTxConfig.KeepAliveDuration,
-	}
+	//syncCfg := &ebTypes.SyncTxReceiptConfig{
+	//	Chain33Host:       startPara.SyncTxConfig.Chain33Host,
+	//	PushHost:          startPara.SyncTxConfig.PushHost,
+	//	PushName:          startPara.SyncTxConfig.PushName,
+	//	PushBind:          startPara.SyncTxConfig.PushBind,
+	//	StartSyncHeight:   startPara.SyncTxConfig.StartSyncHeight,
+	//	StartSyncSequence: startPara.SyncTxConfig.StartSyncSequence,
+	//	StartSyncHash:     startPara.SyncTxConfig.StartSyncHash,
+	//	KeepAliveDuration: startPara.SyncTxConfig.KeepAliveDuration,
+	//}
 
 	registrAddrInDB, err := chain33Relayer.getBridgeRegistryAddr()
 	//如果输入的registry地址非空，且和数据库保存地址不一致，则直接使用输入注册地址
@@ -146,7 +146,7 @@ func StartChain33Relayer(startPara *Chain33StartPara) *Relayer4Chain33 {
 		}
 	}
 
-	go chain33Relayer.syncProc(syncCfg)
+	//go chain33Relayer.syncProc(syncCfg)
 	return chain33Relayer
 }
 
@@ -627,7 +627,7 @@ func (chain33Relayer *Relayer4Chain33) LockBTYAssetAsync(ownerPrivateKey, ethere
 	return lockAsync(ownerPrivateKey, ethereumReceiver, bn.Int64(), chain33Relayer.bridgeBankAddr, chain33Relayer.chainName, chain33Relayer.rpcLaddr)
 }
 
-//ShowBridgeRegistryAddr ...
+// ShowBridgeRegistryAddr ...
 func (chain33Relayer *Relayer4Chain33) ShowBridgeRegistryAddr() (string, error) {
 	if "" == chain33Relayer.bridgeRegistryAddr {
 		return "", errors.New("the relayer is not started yet")
@@ -713,7 +713,7 @@ func (chain33Relayer *Relayer4Chain33) checkTxRelay2Ethereum() {
 	}
 }
 
-//用于chain33的事件信息被中继之后的ack信息，重置标志位
+// 用于chain33的事件信息被中继之后的ack信息，重置标志位
 func (chain33Relayer *Relayer4Chain33) procTxRelayAck(ack *ebTypes.TxRelayAck) {
 	//reset with another key to exclude from the check list to resend the same message
 	if err := chain33Relayer.resetKeyChain33TxRelayedAlready(ack.TxHash); nil != err {

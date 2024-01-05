@@ -4,17 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"io"
-	"net"
-	"net/http"
-	_ "net/http/pprof"
-	"net/rpc"
-	"net/rpc/jsonrpc"
-	"os"
-	"os/signal"
-	"path/filepath"
-	"syscall"
-
 	dbm "github.com/33cn/chain33/common/db"
 	logf "github.com/33cn/chain33/common/log"
 	"github.com/33cn/chain33/common/log/log15"
@@ -29,6 +18,16 @@ import (
 	pluginVersion "github.com/33cn/plugin/version"
 	tml "github.com/BurntSushi/toml"
 	"github.com/btcsuite/btcd/limits"
+	"io"
+	"net"
+	"net/http"
+	_ "net/http/pprof"
+	"net/rpc"
+	"net/rpc/jsonrpc"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"syscall"
 )
 
 var (
@@ -202,12 +201,12 @@ func initCfg(path string) *relayerTypes.RelayerConfig {
 	return &cfg
 }
 
-//IsIPWhiteListEmpty ...
+// IsIPWhiteListEmpty ...
 func IsIPWhiteListEmpty() bool {
 	return len(IPWhiteListMap) == 0
 }
 
-//IsInIPWhitelist 判断ipAddr是否在ip地址白名单中
+// IsInIPWhitelist 判断ipAddr是否在ip地址白名单中
 func IsInIPWhitelist(ipAddrPort string) bool {
 	ipAddr, _, err := net.SplitHostPort(ipAddrPort)
 	if err != nil {
@@ -223,12 +222,12 @@ func IsInIPWhitelist(ipAddrPort string) bool {
 	return false
 }
 
-//RPCServer ...
+// RPCServer ...
 type RPCServer struct {
 	*rpc.Server
 }
 
-//ServeHTTP ...
+// ServeHTTP ...
 func (r *RPCServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	mainlog.Info("ServeHTTP", "request address", req.RemoteAddr)
 	if !IsIPWhiteListEmpty() {
@@ -241,24 +240,24 @@ func (r *RPCServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	r.Server.ServeHTTP(w, req)
 }
 
-//HandleHTTP ...
+// HandleHTTP ...
 func (r *RPCServer) HandleHTTP(rpcPath, debugPath string) {
 	http.Handle(rpcPath, r)
 }
 
-//HTTPConn ...
+// HTTPConn ...
 type HTTPConn struct {
 	in  io.Reader
 	out io.Writer
 }
 
-//Read ...
+// Read ...
 func (c *HTTPConn) Read(p []byte) (n int, err error) { return c.in.Read(p) }
 
-//Write ...
+// Write ...
 func (c *HTTPConn) Write(d []byte) (n int, err error) { return c.out.Write(d) }
 
-//Close ...
+// Close ...
 func (c *HTTPConn) Close() error { return nil }
 
 func startRPCServer(address string, api interface{}) {

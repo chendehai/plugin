@@ -17,7 +17,7 @@ BUILDTIME:=$(shell date +"%Y-%m-%d %H:%M:%S %A")
 VERSION=$(shell git describe --tags || git rev-parse --short=8 HEAD)
 GitCommit=$(shell git rev-parse HEAD)
 BUILD_FLAGS := -ldflags '-X "github.com/33cn/plugin/plugin/dapp/cross2eth/ebrelayer/version.GitCommit=$(GitCommit)" \
-                         -X "github.com/33cn/plugin/plugin/dapp/cross2eth/ebrelayer/version.BuildTime=$(BUILDTIME)" \
+                         -X "github.com/33cn/plugin/plugin/dapp/cross2eth/ebrelaypls set passphase firster/version.BuildTime=$(BUILDTIME)" \
                          -X "github.com/33cn/plugin/version.Version=$(VERSION)" '
 
 BUILD_FLAGSB := -ldflags '-X "github.com/33cn/plugin/plugin/dapp/cross2eth/ebrelayer/version.GitCommit=$(GitCommit)" \
@@ -41,11 +41,11 @@ proj := "build"
 default: build
 
 build:
-	@go build $(BUILD_FLAGS) -v -i -o $(EBRELAER) $(SRC_EBRELAYER)
-	@go build $(BUILD_FLAGS) -v -i -o $(CLI_A) $(SRC_EBCLI)
-	@go build $(BUILD_FLAGSB) -v -i -o $(CLI_B) $(SRC_EBCLI)
-	@go build $(BUILD_FLAGSC) -v -i -o $(CLI_C) $(SRC_EBCLI)
-	@go build $(BUILD_FLAGSD) -v -i -o $(CLI_D) $(SRC_EBCLI)
+	@go build $(BUILD_FLAGS) -v  -o $(EBRELAER) $(SRC_EBRELAYER)
+	@go build $(BUILD_FLAGS) -v -o $(CLI_A) $(SRC_EBCLI)
+#	@go build $(BUILD_FLAGSB) -v -o $(CLI_B) $(SRC_EBCLI)
+#	@go build $(BUILD_FLAGSC) -v  -o $(CLI_C) $(SRC_EBCLI)
+#	@go build $(BUILD_FLAGSD) -v  -o $(CLI_D) $(SRC_EBCLI)
 	@cp ebrelayer/relayer.toml build/
 
 rebuild:
